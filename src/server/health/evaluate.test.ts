@@ -109,6 +109,20 @@ describe('evaluate', () => {
     expect(health.signals[0]?.sinceIsLowerBound).toBe(true)
   })
 
+  it('does not judge the default branch on manual runs', () => {
+    const health = check(
+      repo({
+        pipelines: [
+          pipeline({ id: 'build', runs: [run({ createdAt: '2026-09-29T00:09:14Z', trigger: 'manual', conclusion: 'failure' })] }),
+          pipeline({ id: 'ci', runs: [run({ createdAt: '2026-09-29T02:23:07Z' })] }),
+        ],
+      }),
+    )
+    expect(health.level).toBe('green')
+    expect(health.signals).toEqual([])
+    expect(health.successRate).toBe(1)
+  })
+
   it('ignores failures on muted and disabled pipelines', () => {
     const failing = [run({ createdAt: '2026-09-28T00:00:00Z', conclusion: 'failure' })]
     const health = check(

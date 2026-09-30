@@ -7,7 +7,7 @@ export type Severity = (typeof SEVERITIES)[number]
 export const RULES = {
   default_branch_failing: {
     label: 'Default branch failing',
-    description: 'The latest finished run of a pipeline on the default branch failed.',
+    description: 'The latest finished automatic run of a pipeline on the default branch failed. Manual runs do not count.',
     defaultSeverity: 'red',
   },
   schedule_stale: {

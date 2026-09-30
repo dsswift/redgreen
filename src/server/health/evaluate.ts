@@ -8,7 +8,8 @@ const SCHEDULE_GRACE_MS = 90 * 60 * 1000
 const FAILED: ReadonlySet<RunConclusion> = new Set(['failure', 'timed_out', 'startup_failure'])
 /** Conclusions that say nothing about health, so a streak reads straight through them. */
 const INCONCLUSIVE: ReadonlySet<RunConclusion> = new Set(['cancelled', 'skipped', 'neutral', 'stale', 'action_required'])
-const BRANCH_TRIGGERS: ReadonlySet<Run['trigger']> = new Set(['push', 'schedule', 'manual', 'other'])
+/** Runs that say whether the default branch is healthy. A manual run is an ad-hoc action, not the branch's standing state. */
+const BRANCH_TRIGGERS: ReadonlySet<Run['trigger']> = new Set(['push', 'schedule', 'other'])
 
 export interface EvaluateInput {
   repo: RepoSnapshot
