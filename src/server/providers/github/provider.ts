@@ -129,6 +129,7 @@ export class GithubProvider implements Provider {
         hook_attributes: { url: `${publicUrl}/api/webhooks/github`, active: reachable },
         default_permissions: {
           actions: 'read',
+          administration: 'read',
           checks: 'read',
           contents: 'read',
           issues: 'read',

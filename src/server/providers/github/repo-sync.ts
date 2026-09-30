@@ -60,14 +60,18 @@ export async function syncGithubRepo(kit: Octokit, accountId: string, fullName: 
     return base
   }
 
-  const [tags, releases, pulls, dependabot, codeScanning] = await Promise.all([
+  const [actionsEnabled, tags, releases, pulls, dependabot, codeScanning] = await Promise.all([
+    fetchActionsEnabled(kit, params, log),
     fetchTags(kit, params),
     fetchReleases(kit, params),
     fetchPulls(kit, params),
     fetchDependabot(kit, params, gh.html_url, log),
     fetchCodeScanning(kit, params, gh.html_url, log),
   ])
-  const pipelines = await fetchPipelines(kit, params, gh.default_branch, tags, log)
+  const listed = await fetchPipelines(kit, params, gh.default_branch, tags, log)
+  // Workflows keep reporting "active" after Actions is switched off for the whole repo.
+  const pipelines = actionsEnabled === false ? listed.map((p) => ({ ...p, state: 'disabled' as const })) : listed
+  if (actionsEnabled === false && listed.length > 0) log.info('actions switched off for repo; pipelines marked disabled', { repo: fullName, pipelines: listed.length })
   const pullRequests = await withChecks(kit, params, pulls)
 
   return {
@@ -133,6 +137,20 @@ async function withChecks(kit: Octokit, params: RepoParams, pulls: GhPull[]): Pr
     updatedAt: pr.updated_at,
     checks: states[i] ?? 'none',
   }))
+}
+
+/** Whether Actions is switched on for the repo, or null when the installation may not read the setting. */
+async function fetchActionsEnabled(kit: Octokit, params: RepoParams, log: Logger): Promise<boolean | null> {
+  try {
+    const { data } = await kit.request('GET /repos/{owner}/{repo}/actions/permissions', params)
+    return (data as { enabled: boolean }).enabled
+  } catch (error) {
+    if (isStatus(error, 403, 404)) {
+      log.debug('actions setting unreadable; trusting workflow states', { repo: params.repo, status: Number((error as { status: number }).status) })
+      return null
+    }
+    throw error
+  }
 }
 
 async function fetchDependabot(kit: Octokit, params: RepoParams, repoUrl: string, log: Logger) {
