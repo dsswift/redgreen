@@ -40,6 +40,15 @@ export function createApp(deps: HttpDeps): Hono {
   const { config, store, estate, scheduler, events, providers, github, log } = deps
   const app = new Hono()
 
+  // Every response is private: the site sits behind a shared CDN, and a copy
+  // kept there would reach the next visitor without sign-in. Fingerprinted
+  // assets may still live in the browser's own cache.
+  app.use('*', async (c, next) => {
+    await next()
+    const immutable = c.req.path.startsWith('/assets/') && c.res.status === 200
+    c.res.headers.set('cache-control', immutable ? 'private, max-age=31536000, immutable' : 'private, no-store')
+  })
+
   app.onError((error, c) => {
     log.error('request failed', { method: c.req.method, path: c.req.path, error })
     return c.json({ error: error.message }, 500)
