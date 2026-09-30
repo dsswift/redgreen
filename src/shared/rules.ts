@@ -22,17 +22,17 @@ export const RULES = {
   },
   dependabot_critical: {
     label: 'Critical dependency alerts',
-    description: 'Open critical-severity Dependabot alerts.',
+    description: 'Open critical-severity dependency alerts: Dependabot on GitHub, dependency and container scanning on GitLab.',
     defaultSeverity: 'red',
   },
   code_scanning_critical: {
     label: 'Critical code scanning alerts',
-    description: 'Open critical-severity code scanning alerts.',
+    description: 'Open critical-severity code scanning alerts: code scanning on GitHub, SAST and secret detection on GitLab.',
     defaultSeverity: 'red',
   },
   pr_checks_failing: {
     label: 'Pull request checks failing',
-    description: 'An open, ready-for-review pull request has failing checks.',
+    description: 'An open, ready-for-review pull or merge request has failing checks.',
     defaultSeverity: 'red',
   },
 } as const satisfies Record<string, { label: string; description: string; defaultSeverity: Severity }>

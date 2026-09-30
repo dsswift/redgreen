@@ -100,14 +100,32 @@ export interface RepoDetailResponse {
   syncError: string | null
 }
 
+/** What the settings page needs to walk a person through connecting GitLab. */
+export interface GitlabSetup {
+  /** Base URL of the GitLab instance. */
+  url: string
+  /** Where GitLab sends the browser back after authorizing; the OAuth application must list it. */
+  redirectUri: string
+  /** The OAuth application redgreen will authorize against, or null until one is entered. */
+  app: { source: 'environment' | 'setup'; clientId: string } | null
+  /** Username the stored token belongs to, or null until authorized. */
+  connectedAs: string | null
+  webhookUrl: string
+  /** Secret token to put on GitLab webhooks that point at redgreen. Null until connected. */
+  webhookSecret: string | null
+}
+
 export interface SettingsResponse {
   rules: RuleSeverities
   defaults: RuleSeverities
   providers: ProviderStatus[]
   accounts: Account[]
   publicUrl: string
-  /** Suggested app name for the GitHub setup form. */
-  githubAppName: string
+  setup: {
+    /** Suggested app name for the GitHub setup form. */
+    githubAppName: string
+    gitlab: GitlabSetup
+  }
 }
 
 export type ServerEvent =

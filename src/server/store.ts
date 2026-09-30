@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS http_cache (
 `
 
 /** Provider-specific handle for reaching an account, e.g. a GitHub App installation id. */
-export type Connection = { type: 'github-app'; installationId: number } | { type: 'github-token' }
+export type Connection = { type: 'github-app'; installationId: number } | { type: 'github-token' } | { type: 'gitlab-oauth' } | { type: 'gitlab-token' }
 
 export interface AccountRow extends Account {
   connection: Connection

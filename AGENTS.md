@@ -12,8 +12,9 @@ Estate health board. Read `README.md` first.
   no parameter properties.
 - `src/server/providers/<kind>` is one forge. A provider implements
   `Provider` in `providers/provider.ts` and nothing outside that directory may
-  import forge-specific types. Adding GitLab or Azure DevOps means adding a
-  directory here and registering it in `main.ts`.
+  import forge-specific types. Adding Azure DevOps means adding a directory
+  here and registering it in `main.ts`. What every forge shares (`isStatus`,
+  `RateLimits`) lives directly under `providers/`.
 - Health is computed at read time from stored snapshots in
   `server/health/evaluate.ts`. Changing a rule never needs a resync.
 - `src/web` is a Vite React app served by the server from `dist/web` in
@@ -21,14 +22,17 @@ Estate health board. Read `README.md` first.
 
 ## Rules of the house
 
-- Every GET to a forge goes through the conditional-request hook in
-  `providers/github/client.ts`. Do not bypass it; a sweep must stay free when
-  nothing changed.
+- Every GET to a forge goes through that forge's conditional-request client
+  (`providers/github/client.ts`, `providers/gitlab/client.ts`). Do not bypass
+  it; a sweep must stay free when nothing changed.
 - Logs are JSON lines on stdout. Log both branches of any decision that
   changes what the board shows.
 - No continuously repainting CSS animations in the web app.
 - The GitHub App is public by design so it installs on several orgs. Unknown
-  installations stay pending until approved in the UI. Keep that gate.
+  installations stay pending until approved in the UI. Keep that gate. GitLab
+  groups found through OAuth go through the same gate.
+- GitLab access tokens expire in two hours. The provider refreshes them itself;
+  never cache one outside `providers/gitlab/provider.ts`.
 - `package.json` is the version of record. The release tag must match it.
 
 ## Checks

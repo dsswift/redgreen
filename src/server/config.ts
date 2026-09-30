@@ -29,6 +29,20 @@ const schema = z.object({
   GITHUB_TOKEN: z.string().optional(),
   /** Accounts the token syncs. Required with GITHUB_TOKEN. */
   GITHUB_TOKEN_ACCOUNTS: csv,
+
+  /** Base URL of the GitLab instance. */
+  GITLAB_URL: z.string().url().default('https://gitlab.com'),
+  /** Group or user paths allowed to sync without approval in the UI. Every other namespace found waits as pending. */
+  GITLAB_ALLOWED_ACCOUNTS: csv,
+  /** OAuth application credentials from the environment win over the ones entered on the settings page. Authorizing still happens in the browser. */
+  GITLAB_CLIENT_ID: z.string().optional(),
+  GITLAB_CLIENT_SECRET: z.string().optional(),
+  /** Secret token expected on webhooks GitLab sends. Generated when unset. */
+  GITLAB_WEBHOOK_SECRET: z.string().optional(),
+  /** A personal or group access token instead of OAuth. Meant for running locally. */
+  GITLAB_TOKEN: z.string().optional(),
+  /** Group or user paths the token syncs. Required with GITLAB_TOKEN. */
+  GITLAB_TOKEN_ACCOUNTS: csv,
 })
 
 export type Config = z.infer<typeof schema>

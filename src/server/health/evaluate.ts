@@ -1,8 +1,8 @@
 import { CronExpressionParser } from 'cron-parser'
-import type { Pipeline, RepoSnapshot, Run, RunConclusion } from '../../shared/model.ts'
+import type { Pipeline, RepoSnapshot, Run, RunConclusion, Schedule } from '../../shared/model.ts'
 import type { RepoHealth, RepoSettings, RuleKey, RuleSeverities, Signal } from '../../shared/rules.ts'
 
-/** GitHub and its peers routinely start scheduled runs late; a run this late is not yet missed. */
+/** Forges routinely start scheduled runs late; a run this late is not yet missed. */
 const SCHEDULE_GRACE_MS = 90 * 60 * 1000
 
 const FAILED: ReadonlySet<RunConclusion> = new Set(['failure', 'timed_out', 'startup_failure'])
@@ -135,7 +135,7 @@ function scheduleStale(pipeline: Pipeline, now: Date): Omit<Signal, 'rule' | 'se
   const baseline = new Date(lastScheduled?.createdAt ?? pipeline.updatedAt)
   const cutoff = now.getTime() - SCHEDULE_GRACE_MS
   const missed = pipeline.schedules
-    .flatMap((expr) => nextFires(expr, baseline, 2))
+    .flatMap((schedule) => nextFires(schedule, baseline, 2))
     .filter((t) => t.getTime() <= cutoff)
     .sort((a, b) => a.getTime() - b.getTime())
 
@@ -149,9 +149,9 @@ function scheduleStale(pipeline: Pipeline, now: Date): Omit<Signal, 'rule' | 'se
   }
 }
 
-function nextFires(expression: string, after: Date, count: number): Date[] {
+function nextFires(schedule: Schedule, after: Date, count: number): Date[] {
   try {
-    const cron = CronExpressionParser.parse(expression, { currentDate: after, tz: 'UTC' })
+    const cron = CronExpressionParser.parse(schedule.cron, { currentDate: after, tz: schedule.timezone })
     return Array.from({ length: count }, () => cron.next().toDate())
   } catch {
     return []

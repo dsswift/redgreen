@@ -100,7 +100,7 @@ export class Estate {
 
 function toCard(row: RepoRow, health: RepoHealth | null, settings: RepoSettings, levelSince: string | null): RepoCard {
   const s = row.snapshot
-  const name = row.fullName.split('/')[1]
+  const name = row.fullName.split('/').at(-1)
   return {
     id: row.id,
     provider: row.provider,

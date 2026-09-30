@@ -1,7 +1,8 @@
 import { parse } from 'yaml'
+import type { Schedule } from '../../../shared/model.ts'
 
-/** Cron expressions a GitHub Actions workflow file declares under `on.schedule`. */
-export function parseSchedules(workflowYaml: string): string[] {
+/** Schedules a GitHub Actions workflow file declares under `on.schedule`. GitHub evaluates them in UTC. */
+export function parseSchedules(workflowYaml: string): Schedule[] {
   let doc: unknown
   try {
     doc = parse(workflowYaml)
@@ -11,7 +12,7 @@ export function parseSchedules(workflowYaml: string): string[] {
   if (!isRecord(doc)) return []
   const on = doc.on
   if (!isRecord(on) || !Array.isArray(on.schedule)) return []
-  return on.schedule.flatMap((entry) => (isRecord(entry) && typeof entry.cron === 'string' ? [entry.cron.trim()] : []))
+  return on.schedule.flatMap((entry) => (isRecord(entry) && typeof entry.cron === 'string' ? [{ cron: entry.cron.trim(), timezone: 'UTC' }] : []))
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -1,7 +1,7 @@
 // Shapes of the GitHub REST responses redgreen reads, and their mapping onto
 // the estate model. Only the fields used are declared.
 
-import type { AlertCounts, ChecksState, Pipeline, PipelineState, Run, RunConclusion, RunTrigger } from '../../../shared/model.ts'
+import type { AlertCounts, ChecksState, Pipeline, PipelineState, Run, RunConclusion, RunTrigger, Schedule } from '../../../shared/model.ts'
 
 export interface GhRepo {
   id: number
@@ -109,7 +109,7 @@ export function pipelineState(state: string): PipelineState | null {
   }
 }
 
-export function toPipeline(workflow: GhWorkflow, state: PipelineState, schedules: string[], runs: Run[]): Pipeline {
+export function toPipeline(workflow: GhWorkflow, state: PipelineState, schedules: Schedule[], runs: Run[]): Pipeline {
   return {
     id: String(workflow.id),
     name: workflow.name,

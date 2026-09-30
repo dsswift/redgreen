@@ -82,6 +82,14 @@ export async function fetchManifest(name: string): Promise<{ action: string; man
   return call(`/api/github/manifest?name=${encodeURIComponent(name)}`)
 }
 
+export function useSaveGitlabApp() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (app: { clientId: string; clientSecret: string }) => call<SettingsResponse>('/api/gitlab/app', { method: 'POST', body: JSON.stringify(app) }),
+    onSuccess: (settings) => client.setQueryData(keys.settings, settings),
+  })
+}
+
 /** Keeps queries fresh from the server's event stream. */
 export function useLiveUpdates(client: QueryClient): void {
   useEffect(() => {

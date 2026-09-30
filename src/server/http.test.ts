@@ -8,6 +8,7 @@ import { Events } from './events.ts'
 import { createApp } from './http.ts'
 import { createLogger } from './log.ts'
 import { GithubProvider } from './providers/github/provider.ts'
+import { GitlabProvider } from './providers/gitlab/provider.ts'
 import { SecretBox } from './secrets.ts'
 import { Store } from './store.ts'
 import { Scheduler } from './sync/scheduler.ts'
@@ -22,11 +23,14 @@ function app() {
   const log = createLogger('test')
   const config = loadConfig({})
   const store = new Store(':memory:')
-  const github = new GithubProvider(config, store, SecretBox.load(Buffer.alloc(32, 1).toString('base64'), webDir, log), log)
-  const estate = new Estate(store, [github])
+  const secrets = SecretBox.load(Buffer.alloc(32, 1).toString('base64'), webDir, log)
+  const github = new GithubProvider(config, store, secrets, log)
+  const gitlab = new GitlabProvider(config, store, secrets, log)
+  const providers = [github, gitlab]
+  const estate = new Estate(store, providers)
   const events = new Events()
-  const scheduler = new Scheduler([github], store, estate, events, config, log)
-  return createApp({ config, store, estate, scheduler, events, providers: [github], github, log, webDir })
+  const scheduler = new Scheduler(providers, store, estate, events, config, log)
+  return createApp({ config, store, estate, scheduler, events, providers, github, gitlab, log, webDir })
 }
 
 describe('http', () => {

@@ -7,6 +7,7 @@ import { Events } from './events.ts'
 import { createApp } from './http.ts'
 import { createLogger } from './log.ts'
 import { GithubProvider } from './providers/github/provider.ts'
+import { GitlabProvider } from './providers/gitlab/provider.ts'
 import { SecretBox } from './secrets.ts'
 import { Store } from './store.ts'
 import { Scheduler } from './sync/scheduler.ts'
@@ -19,7 +20,8 @@ const store = new Store(join(dataDir, 'redgreen.sqlite'))
 const secrets = SecretBox.load(config.SECRET_KEY, dataDir, log)
 const events = new Events()
 const github = new GithubProvider(config, store, secrets, createLogger('github'))
-const providers = [github]
+const gitlab = new GitlabProvider(config, store, secrets, createLogger('gitlab'))
+const providers = [github, gitlab]
 const estate = new Estate(store, providers)
 const scheduler = new Scheduler(providers, store, estate, events, config, createLogger('sync'))
 
@@ -32,6 +34,7 @@ const app = createApp({
   events,
   providers,
   github,
+  gitlab,
   log: createLogger('http'),
   webDir: existsSync(webDir) ? webDir : null,
 })

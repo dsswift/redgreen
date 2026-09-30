@@ -25,8 +25,8 @@ last push, latest releases, success rate, and how long a repo has been red.
 
 ## Providers
 
-GitHub is the provider today. The estate model is provider-neutral: an account,
-a repo, a pipeline, a run, a release. GitLab and Azure DevOps are added by
+GitHub and GitLab are the providers today. The estate model is provider-neutral:
+an account, a repo, a pipeline, a run, a release. Azure DevOps is added by
 writing a new provider behind the same interface. Nothing else changes.
 
 GitHub is read through a GitHub App you create from the settings page in one
@@ -36,6 +36,22 @@ an unchanged estate costs no API quota.
 
 The app is public so it can be installed on several orgs. An installation from
 an account you did not list waits for your approval in the UI.
+
+GitLab is read through an OAuth application you create on GitLab (user or
+group settings, Applications) with the `read_api` scope and the redirect URI
+the settings page shows. Paste its id and secret, authorize in the browser, and
+every group you belong to appears as a pending account; switch on the ones you
+want. A group brings all of its projects, subgroups included. gitlab.com and
+self-managed both work; set `GITLAB_URL` for the latter.
+
+GitLab has no app-level webhooks, so polling does the work. For faster
+refreshes, add a webhook on a group or project with the URL and secret token
+the settings page shows, on the pipeline, push, tag push, merge request, and
+release events.
+
+A GitLab project shows as one pipeline plus one per pipeline schedule.
+Vulnerability counts need GitLab Ultimate; on other tiers the security feeds
+read "not available".
 
 ## Run it
 
@@ -49,6 +65,7 @@ against a personal token for a quick look:
 
 ```bash
 GITHUB_TOKEN=$(gh auth token) GITHUB_TOKEN_ACCOUNTS=my-org,my-user npm run dev:server
+GITLAB_TOKEN=glpat-... GITLAB_TOKEN_ACCOUNTS=my-group,my-user npm run dev:server
 ```
 
 Configuration is by environment variable:
@@ -64,9 +81,15 @@ Configuration is by environment variable:
 | `GITHUB_ALLOWED_ACCOUNTS` | | Logins that sync without approval |
 | `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_APP_WEBHOOK_SECRET`, `GITHUB_APP_SLUG` | | App credentials from the environment, instead of the setup flow |
 | `GITHUB_TOKEN`, `GITHUB_TOKEN_ACCOUNTS` | | Personal token mode for local runs |
+| `GITLAB_URL` | `https://gitlab.com` | The GitLab instance |
+| `GITLAB_ALLOWED_ACCOUNTS` | | Group or user paths that sync without approval |
+| `GITLAB_CLIENT_ID`, `GITLAB_CLIENT_SECRET` | | OAuth application from the environment, instead of the settings page; authorizing still happens in the browser |
+| `GITLAB_WEBHOOK_SECRET` | generated | Secret token expected on GitLab webhooks |
+| `GITLAB_TOKEN`, `GITLAB_TOKEN_ACCOUNTS` | | Access token mode for local runs |
 
 There is no login of its own. Put it behind your own gate (oauth2-proxy, a VPN,
-a LAN) and leave `POST /api/webhooks/github` and `GET /healthz` open.
+a LAN) and leave `POST /api/webhooks/github`, `POST /api/webhooks/gitlab`, and
+`GET /healthz` open.
 
 ## Deploy
 

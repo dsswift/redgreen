@@ -1,8 +1,10 @@
 // The provider-neutral estate model. Every provider normalizes into these
 // shapes; nothing downstream of a provider knows which forge a repo lives on.
 
-export const PROVIDERS = ['github'] as const
+export const PROVIDERS = ['github', 'gitlab'] as const
 export type ProviderKind = (typeof PROVIDERS)[number]
+
+export const PROVIDER_LABELS: Record<ProviderKind, string> = { github: 'GitHub', gitlab: 'GitLab' }
 
 export type AccountKind = 'organization' | 'user'
 
@@ -53,6 +55,12 @@ export interface Run {
 /** Enabled: runs normally. Disabled: switched off by a person. Dormant: switched off by the forge for inactivity. */
 export type PipelineState = 'enabled' | 'disabled' | 'dormant'
 
+export interface Schedule {
+  cron: string
+  /** IANA time zone the cron expression is evaluated in. */
+  timezone: string
+}
+
 export interface Pipeline {
   id: string
   name: string
@@ -61,8 +69,8 @@ export interface Pipeline {
   state: PipelineState
   createdAt: string
   updatedAt: string
-  /** Cron expressions (UTC) the pipeline is scheduled on. */
-  schedules: string[]
+  /** Schedules the pipeline fires on. */
+  schedules: Schedule[]
   /** Most recent runs, newest first. Bounded; see the provider for the depth. */
   runs: Run[]
 }

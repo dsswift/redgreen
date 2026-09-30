@@ -1,7 +1,7 @@
 import type { Octokit } from 'octokit'
-import type { Pipeline, PullRequest, Release, RepoSnapshot, Run } from '../../../shared/model.ts'
+import type { Pipeline, PullRequest, Release, RepoSnapshot, Run, Schedule } from '../../../shared/model.ts'
 import type { Logger } from '../../log.ts'
-import { isStatus } from './client.ts'
+import { isStatus } from '../errors.ts'
 import {
   checksState,
   codeScanningCounts,
@@ -244,7 +244,7 @@ async function fetchWorkflowRuns(
   return (data as { workflow_runs: GhRun[] }).workflow_runs
 }
 
-async function fetchSchedules(kit: Octokit, params: RepoParams, workflow: GhWorkflow, ref: string): Promise<string[]> {
+async function fetchSchedules(kit: Octokit, params: RepoParams, workflow: GhWorkflow, ref: string): Promise<Schedule[]> {
   // Dynamic workflows (e.g. from a marketplace app) have no file in the repo.
   if (!workflow.path.startsWith('.github/workflows/')) return []
   try {

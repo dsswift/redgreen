@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { AccountSummary, EstateResponse, RepoCard } from '../../shared/api.ts'
+import { PROVIDER_LABELS } from '../../shared/model.ts'
 import type { Level, Signal } from '../../shared/rules.ts'
 import { useEstate } from '../api.ts'
 import { ago, compact, duration } from '../format.ts'
@@ -60,7 +61,7 @@ export function Board() {
               )}
             />
           ))}
-        {data.accounts.length === 0 && <Empty>No accounts yet. Connect GitHub in Settings.</Empty>}
+        {data.accounts.length === 0 && <Empty>No accounts yet. Connect a provider in Settings.</Empty>}
       </div>
     </div>
   )
@@ -114,14 +115,15 @@ function Stat({ label, value }: { label: string; value: number }) {
 }
 
 function SetupNotices({ data }: { data: EstateResponse }) {
-  const provider = data.providers.find((p) => !p.configured)
+  const unconfigured = data.providers.filter((p) => !p.configured)
   const pending = data.accounts.filter((a) => a.status === 'pending')
-  if (!provider && pending.length === 0) return null
+  // One provider is a choice, not a gap; nag only when nothing is connected.
+  if (unconfigured.length < data.providers.length && pending.length === 0) return null
   return (
     <div className="flex flex-col gap-2">
-      {provider && (
+      {unconfigured.length === data.providers.length && (
         <Notice>
-          GitHub is not connected yet.{' '}
+          {unconfigured.map((p) => PROVIDER_LABELS[p.kind]).join(' and ')} {unconfigured.length === 1 ? 'is' : 'are'} not connected yet.{' '}
           <Link to={{ page: 'settings' }} className="underline underline-offset-4">
             Set it up in Settings.
           </Link>
@@ -129,7 +131,7 @@ function SetupNotices({ data }: { data: EstateResponse }) {
       )}
       {pending.length > 0 && (
         <Notice>
-          {pending.length === 1 ? 'An account installed the app and is' : `${pending.length} accounts installed the app and are`} waiting for approval:{' '}
+          {pending.length === 1 ? 'An account is' : `${pending.length} accounts are`} waiting for approval:{' '}
           {pending.map((a) => a.login).join(', ')}.{' '}
           <Link to={{ page: 'settings' }} className="underline underline-offset-4">
             Review in Settings.

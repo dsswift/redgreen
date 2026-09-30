@@ -10,6 +10,7 @@ import type { Estate } from './estate.ts'
 import type { Events } from './events.ts'
 import type { Logger } from './log.ts'
 import type { GithubProvider } from './providers/github/provider.ts'
+import type { GitlabProvider } from './providers/gitlab/provider.ts'
 import type { Provider } from './providers/provider.ts'
 import type { Store } from './store.ts'
 import type { Scheduler } from './sync/scheduler.ts'
@@ -22,6 +23,7 @@ export interface HttpDeps {
   events: Events
   providers: Provider[]
   github: GithubProvider
+  gitlab: GitlabProvider
   log: Logger
   /** Directory holding the built web app, or null to serve the API only. */
   webDir: string | null
@@ -35,9 +37,10 @@ const repoSettingsSchema = z.object({
   ruleOverrides: z.object(Object.fromEntries(RULE_KEYS.map((k) => [k, severitySchema.optional()]))).optional(),
 })
 const accountStatusSchema = z.object({ status: z.enum(['active', 'pending', 'ignored']) })
+const gitlabAppSchema = z.object({ clientId: z.string().trim().min(1), clientSecret: z.string().trim().min(1) })
 
 export function createApp(deps: HttpDeps): Hono {
-  const { config, store, estate, scheduler, events, providers, github, log } = deps
+  const { config, store, estate, scheduler, events, providers, github, gitlab, log } = deps
   const app = new Hono()
 
   // Every response is private: the site sits behind a shared CDN, and a copy
@@ -106,7 +109,10 @@ export function createApp(deps: HttpDeps): Hono {
     providers: providers.map((p) => p.status()),
     accounts: store.listAccounts().map(({ connection: _c, seenAt: _s, ...account }) => account),
     publicUrl: config.PUBLIC_URL,
-    githubAppName: `redgreen-${new URL(config.PUBLIC_URL).hostname.split('.')[0]}`,
+    setup: {
+      githubAppName: `redgreen-${new URL(config.PUBLIC_URL).hostname.split('.')[0]}`,
+      gitlab: gitlab.setup(),
+    },
   })
 
   app.get('/api/settings', (c) => c.json(settingsResponse()))
@@ -135,7 +141,7 @@ export function createApp(deps: HttpDeps): Hono {
 
   // GitHub setup and webhooks --------------------------------------------------
 
-  app.get('/api/github/manifest', (c) => c.json(github.manifest(c.req.query('name') ?? settingsResponse().githubAppName)))
+  app.get('/api/github/manifest', (c) => c.json(github.manifest(c.req.query('name') ?? settingsResponse().setup.githubAppName)))
 
   app.get('/setup/github/callback', async (c) => {
     const code = c.req.query('code')
@@ -145,20 +151,49 @@ export function createApp(deps: HttpDeps): Hono {
     return c.redirect('/settings?created=github')
   })
 
-  app.post('/api/webhooks/github', async (c) => {
-    if (!github.handleWebhook) return c.text('Not supported', 404)
-    const body = await c.req.text()
-    let outcome
-    try {
-      outcome = await github.handleWebhook(c.req.raw.headers, body)
-    } catch (error) {
-      log.warn('webhook rejected', { error })
-      return c.text('Rejected', 400)
-    }
-    for (const fullName of outcome.repos) scheduler.refreshByFullName('github', fullName, 'webhook')
-    if (outcome.rediscover) void scheduler.sweep('webhook')
-    return c.text('OK', 202)
+  // GitLab setup and webhooks --------------------------------------------------
+
+  app.post('/api/gitlab/app', async (c) => {
+    const parsed = gitlabAppSchema.safeParse(await c.req.json())
+    if (!parsed.success) return c.json({ error: parsed.error.message }, 400)
+    gitlab.saveApp(parsed.data.clientId, parsed.data.clientSecret)
+    return c.json(settingsResponse())
   })
+
+  app.get('/setup/gitlab/start', (c) => c.redirect(gitlab.startAuthorize()))
+
+  app.get('/setup/gitlab/callback', async (c) => {
+    const code = c.req.query('code')
+    const state = c.req.query('state')
+    if (!code || !state) return c.text(`GitLab did not send a code: ${c.req.query('error_description') ?? c.req.query('error') ?? 'unknown reason'}`, 400)
+    try {
+      await gitlab.completeAuthorize(code, state)
+    } catch (error) {
+      // A person lands here in a browser, so the reason has to be readable.
+      log.warn('gitlab authorize failed', { error })
+      return c.text(`GitLab authorization failed: ${error instanceof Error ? error.message : String(error)}`, 400)
+    }
+    void scheduler.sweep('gitlab authorized')
+    return c.redirect('/settings?created=gitlab')
+  })
+
+  // Webhooks -------------------------------------------------------------------
+
+  for (const provider of [github, gitlab]) {
+    app.post(`/api/webhooks/${provider.kind}`, async (c) => {
+      const body = await c.req.text()
+      let outcome
+      try {
+        outcome = await provider.handleWebhook(c.req.raw.headers, body)
+      } catch (error) {
+        log.warn('webhook rejected', { provider: provider.kind, error })
+        return c.text('Rejected', 400)
+      }
+      for (const fullName of outcome.repos) scheduler.refreshByFullName(provider.kind, fullName, 'webhook')
+      if (outcome.rediscover) void scheduler.sweep('webhook')
+      return c.text('OK', 202)
+    })
+  }
 
   // Live updates -----------------------------------------------------------------
 

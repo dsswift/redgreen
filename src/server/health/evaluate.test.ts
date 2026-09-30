@@ -154,7 +154,7 @@ describe('evaluate', () => {
   })
 
   describe('schedules', () => {
-    const daily = (runs: Run[]) => repo({ pipelines: [pipeline({ schedules: ['0 6 * * *'], runs })] })
+    const daily = (runs: Run[]) => repo({ pipelines: [pipeline({ schedules: [{ cron: '0 6 * * *', timezone: 'UTC' }], runs })] })
 
     it('stays green while a daily schedule keeps running', () => {
       const health = check(daily([run({ createdAt: '2026-09-29T06:04:00Z', trigger: 'schedule' })]))
@@ -171,8 +171,16 @@ describe('evaluate', () => {
       expect(health.signals[0]).toMatchObject({ rule: 'schedule_stale', since: '2026-09-28T06:00:00.000Z' })
     })
 
+    it('evaluates the cron in the schedule time zone', () => {
+      // 06:00 in Tokyo is 21:00 UTC the day before. Read as UTC, the fires at 06:00 on the 28th and 29th would both look missed.
+      const tokyo = repo({
+        pipelines: [pipeline({ schedules: [{ cron: '0 6 * * *', timezone: 'Asia/Tokyo' }], runs: [run({ createdAt: '2026-09-27T21:04:00Z', trigger: 'schedule' })] })],
+      })
+      expect(check(tokyo).level).toBe('green')
+    })
+
     it('flags a schedule the forge switched off', () => {
-      const health = check(repo({ pipelines: [pipeline({ state: 'dormant', schedules: ['0 6 * * *'] })] }))
+      const health = check(repo({ pipelines: [pipeline({ state: 'dormant', schedules: [{ cron: '0 6 * * *', timezone: 'UTC' }] })] }))
       expect(health.signals[0]).toMatchObject({ rule: 'schedule_stale', title: 'CI schedule switched off' })
     })
   })

@@ -13,7 +13,10 @@ on:
     - cron: "30 18 * * 1-5"
 jobs: {}
 `
-    expect(parseSchedules(yaml)).toEqual(['0 6 * * *', '30 18 * * 1-5'])
+    expect(parseSchedules(yaml)).toEqual([
+      { cron: '0 6 * * *', timezone: 'UTC' },
+      { cron: '30 18 * * 1-5', timezone: 'UTC' },
+    ])
   })
 
   it('returns nothing for workflows without a schedule or with broken yaml', () => {

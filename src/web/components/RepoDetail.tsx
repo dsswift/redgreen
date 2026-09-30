@@ -1,5 +1,5 @@
 import type { RepoDetailResponse } from '../../shared/api.ts'
-import type { Pipeline, PullRequest, Run } from '../../shared/model.ts'
+import { PROVIDER_LABELS, type Pipeline, type ProviderKind, type PullRequest, type Run } from '../../shared/model.ts'
 import { RULES, RULE_KEYS, type Severity } from '../../shared/rules.ts'
 import { useRepo, useSettings, useSyncRepo, useUpdateRepoSettings } from '../api.ts'
 import { ago, date, percent } from '../format.ts'
@@ -18,7 +18,9 @@ function Detail({ detail }: { detail: RepoDetailResponse }) {
   const update = useUpdateRepoSettings(detail.id)
   const sync = useSyncRepo(detail.id)
   const level = health?.level ?? 'unknown'
-  const [owner, name] = detail.fullName.split('/')
+  const segments = detail.fullName.split('/')
+  const name = segments.at(-1)
+  const owner = segments.slice(0, -1).join('/')
 
   return (
     <div className="flex flex-col gap-10 pt-8">
@@ -49,7 +51,7 @@ function Detail({ detail }: { detail: RepoDetailResponse }) {
                 <span>default {snapshot.defaultBranch}</span>
               </>
             )}
-            {snapshot && <External href={snapshot.url}>open on GitHub ↗</External>}
+            {snapshot && <External href={snapshot.url}>open on {PROVIDER_LABELS[snapshot.provider]} ↗</External>}
           </p>
           {snapshot?.description && <p className="mt-3 max-w-2xl text-sm text-ink-300">{snapshot.description}</p>}
         </div>
@@ -120,7 +122,7 @@ function Detail({ detail }: { detail: RepoDetailResponse }) {
             </section>
 
             <section>
-              <Kicker>Open pull requests · {snapshot.openPullRequests}</Kicker>
+              <Kicker>Open {snapshot.provider === 'gitlab' ? 'merge' : 'pull'} requests · {snapshot.openPullRequests}</Kicker>
               {snapshot.pullRequests.length === 0 ? (
                 <p className="mt-3 text-sm text-ink-400">None.</p>
               ) : (
@@ -158,8 +160,8 @@ function Detail({ detail }: { detail: RepoDetailResponse }) {
             <Panel className="p-4">
               <Kicker>Security</Kicker>
               <ul className="mt-2 flex flex-col gap-1.5 text-sm">
-                <SecurityLine label="Dependabot" counts={snapshot.security.dependabot} />
-                <SecurityLine label="Code scanning" counts={snapshot.security.codeScanning} />
+                <SecurityLine label={SECURITY_LABELS[snapshot.provider].dependabot} counts={snapshot.security.dependabot} />
+                <SecurityLine label={SECURITY_LABELS[snapshot.provider].codeScanning} counts={snapshot.security.codeScanning} />
               </ul>
             </Panel>
 
@@ -229,7 +231,12 @@ function RunSquare({ run }: { run: Run }) {
   )
 }
 
-const STATE_LABEL: Record<Pipeline['state'], string> = { enabled: '', disabled: 'disabled', dormant: 'switched off by GitHub' }
+const STATE_LABEL: Record<Pipeline['state'], string> = { enabled: '', disabled: 'disabled', dormant: 'switched off by the forge' }
+
+const SECURITY_LABELS: Record<ProviderKind, { dependabot: string; codeScanning: string }> = {
+  github: { dependabot: 'Dependabot', codeScanning: 'Code scanning' },
+  gitlab: { dependabot: 'Dependency scanning', codeScanning: 'SAST and secrets' },
+}
 
 function PipelineRow({
   pipeline,
@@ -253,8 +260,9 @@ function PipelineRow({
         </External>
         <span className="font-mono text-[11px] text-ink-400">{pipeline.path.replace('.github/workflows/', '')}</span>
         {pipeline.schedules.map((s) => (
-          <span key={s} className="rounded-sm border border-ink-700 px-1.5 font-mono text-[10px] text-ink-300">
-            ⏱ {s}
+          <span key={`${s.cron} ${s.timezone}`} className="rounded-sm border border-ink-700 px-1.5 font-mono text-[10px] text-ink-300">
+            ⏱ {s.cron}
+            {s.timezone !== 'UTC' && ` ${s.timezone}`}
           </span>
         ))}
         {STATE_LABEL[pipeline.state] && <span className="font-mono text-[11px] text-amber">{STATE_LABEL[pipeline.state]}</span>}
