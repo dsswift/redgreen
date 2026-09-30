@@ -49,5 +49,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
       store.close()
       process.exit(0)
     })
+    // Open event streams would otherwise hold the server open indefinitely.
+    if ('closeAllConnections' in server) server.closeAllConnections()
   })
 }
