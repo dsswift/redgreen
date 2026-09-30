@@ -1,0 +1,65 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/bricolage-grotesque';
+@import '@fontsource-variable/jetbrains-mono';
+
+@theme {
+  --font-sans: 'Bricolage Grotesque Variable', ui-sans-serif, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
+
+  --color-ink-950: #0b0c0d;
+  --color-ink-900: #111213;
+  --color-ink-850: #161819;
+  --color-ink-800: #1c1e20;
+  --color-ink-700: #27292c;
+  --color-ink-600: #37393d;
+  --color-ink-400: #6f7378;
+  --color-ink-300: #9a9ea3;
+  --color-ink-200: #c9ccd0;
+  --color-ink-100: #eceef0;
+
+  --color-red: #ff4a3d;
+  --color-red-dim: #7a2620;
+  --color-amber: #ffb02e;
+  --color-amber-dim: #6e4c12;
+  --color-green: #2fd07a;
+  --color-green-dim: #16593a;
+  --color-quiet: #4c5b6b;
+  --color-unknown: #3a3d42;
+}
+
+@layer base {
+  html {
+    background: var(--color-ink-950);
+    color: var(--color-ink-100);
+    font-family: var(--font-sans);
+    font-optical-sizing: auto;
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    min-height: 100vh;
+    background-image:
+      radial-gradient(1200px 500px at 20% -10%, rgba(255, 74, 61, 0.07), transparent 60%),
+      radial-gradient(900px 500px at 90% 0%, rgba(47, 208, 122, 0.07), transparent 60%);
+  }
+  ::selection {
+    background: var(--color-amber);
+    color: var(--color-ink-950);
+  }
+  a {
+    color: inherit;
+  }
+  button {
+    cursor: pointer;
+  }
+}
+
+@utility lamp-* {
+  background: --value(--color- *);
+  box-shadow: 0 0 0 1px color-mix(in oklab, --value(--color- *) 40%, transparent), 0 0 10px color-mix(in oklab, --value(--color- *) 45%, transparent);
+}
+
+@utility rule-line {
+  background-image: linear-gradient(90deg, var(--color-ink-700) 0 6px, transparent 6px 10px);
+  background-size: 10px 1px;
+  background-repeat: repeat-x;
+}
