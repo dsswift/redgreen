@@ -78,7 +78,7 @@ Configuration is by environment variable:
 | `SECRET_KEY` | generated | Base64 32-byte key that encrypts provider credentials at rest |
 | `SYNC_INTERVAL_MINUTES` | `5` | Minutes between full sweeps |
 | `SYNC_CONCURRENCY` | `4` | Repos synced at once |
-| `ORRERY_URL`, `ORRERY_TOKEN` | | An Orrery hub's ingest URL and a source token. When both are set, every repo is pushed there as a `service` entity: language, branch protection, last push, pipeline health, alert counts, and a link back to its page here |
+| `ORRERY_URL`, `ORRERY_TOKEN` | | An Orrery hub's ingest URL and a source token. When both are set, every repo is pushed there as a `repository` entity: language, branch protection, last push, pipeline health, alert counts, and a link back to its page here. The `repository` blueprint is offered to the hub first, so the source must be registered for it |
 | `GITHUB_ALLOWED_ACCOUNTS` | | Logins that sync without approval |
 | `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_APP_WEBHOOK_SECRET`, `GITHUB_APP_SLUG` | | App credentials from the environment, instead of the setup flow |
 | `GITHUB_TOKEN`, `GITHUB_TOKEN_ACCOUNTS` | | Personal token mode for local runs |

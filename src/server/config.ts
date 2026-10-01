@@ -15,7 +15,7 @@ const schema = z.object({
   SYNC_INTERVAL_MINUTES: z.coerce.number().positive().default(5),
   /** Repos synced at the same time. */
   SYNC_CONCURRENCY: z.coerce.number().int().positive().default(4),
-  /** An Orrery hub's ingest URL. With a token, every repo is pushed to it as a `service` entity. */
+  /** An Orrery hub's ingest URL. With a token, every repo is pushed to it as a `repository` entity. */
   ORRERY_URL: z.string().url().optional(),
   /** A source token for the hub. */
   ORRERY_TOKEN: z.string().optional(),
