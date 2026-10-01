@@ -236,6 +236,7 @@ const STATE_LABEL: Record<Pipeline['state'], string> = { enabled: '', disabled: 
 const SECURITY_LABELS: Record<ProviderKind, { dependabot: string; codeScanning: string }> = {
   github: { dependabot: 'Dependabot', codeScanning: 'Code scanning' },
   gitlab: { dependabot: 'Dependency scanning', codeScanning: 'SAST and secrets' },
+  azuredevops: { dependabot: 'Dependency scanning', codeScanning: 'Code and secret scanning' },
 }
 
 function PipelineRow({

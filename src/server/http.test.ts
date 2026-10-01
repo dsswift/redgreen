@@ -7,6 +7,7 @@ import { Estate } from './estate.ts'
 import { Events } from './events.ts'
 import { createApp } from './http.ts'
 import { createLogger } from './log.ts'
+import { AzureDevopsProvider } from './providers/azuredevops/provider.ts'
 import { GithubProvider } from './providers/github/provider.ts'
 import { GitlabProvider } from './providers/gitlab/provider.ts'
 import { SecretBox } from './secrets.ts'
@@ -26,11 +27,12 @@ function app() {
   const secrets = SecretBox.load(Buffer.alloc(32, 1).toString('base64'), webDir, log)
   const github = new GithubProvider(config, store, secrets, log)
   const gitlab = new GitlabProvider(config, store, secrets, log)
-  const providers = [github, gitlab]
+  const azuredevops = new AzureDevopsProvider(config, store, secrets, log)
+  const providers = [github, gitlab, azuredevops]
   const estate = new Estate(store, providers)
   const events = new Events()
   const scheduler = new Scheduler(providers, store, estate, events, config, log)
-  return createApp({ config, store, estate, scheduler, events, providers, github, gitlab, log, webDir })
+  return createApp({ config, store, estate, scheduler, events, providers, github, gitlab, azuredevops, log, webDir })
 }
 
 describe('http', () => {

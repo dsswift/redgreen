@@ -1,10 +1,10 @@
 // The provider-neutral estate model. Every provider normalizes into these
 // shapes; nothing downstream of a provider knows which forge a repo lives on.
 
-export const PROVIDERS = ['github', 'gitlab'] as const
+export const PROVIDERS = ['github', 'gitlab', 'azuredevops'] as const
 export type ProviderKind = (typeof PROVIDERS)[number]
 
-export const PROVIDER_LABELS: Record<ProviderKind, string> = { github: 'GitHub', gitlab: 'GitLab' }
+export const PROVIDER_LABELS: Record<ProviderKind, string> = { github: 'GitHub', gitlab: 'GitLab', azuredevops: 'Azure DevOps' }
 
 export type AccountKind = 'organization' | 'user'
 

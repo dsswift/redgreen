@@ -47,6 +47,13 @@ const schema = z.object({
   GITLAB_TOKEN: z.string().optional(),
   /** Group or user paths the token syncs. Required with GITLAB_TOKEN. */
   GITLAB_TOKEN_ACCOUNTS: csv,
+
+  /** An Entra application added to each Azure DevOps organization as a user. From the environment it wins over one entered on the settings page. */
+  AZURE_DEVOPS_TENANT_ID: z.string().optional(),
+  AZURE_DEVOPS_CLIENT_ID: z.string().optional(),
+  AZURE_DEVOPS_CLIENT_SECRET: z.string().optional(),
+  /** Organizations the application reads, by name. Required with the three above. */
+  AZURE_DEVOPS_ORGANIZATIONS: csv,
 })
 
 export type Config = z.infer<typeof schema>

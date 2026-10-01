@@ -7,6 +7,7 @@ import { Events } from './events.ts'
 import { createApp } from './http.ts'
 import { createLogger } from './log.ts'
 import { OrreryPusher } from './orrery.ts'
+import { AzureDevopsProvider } from './providers/azuredevops/provider.ts'
 import { GithubProvider } from './providers/github/provider.ts'
 import { GitlabProvider } from './providers/gitlab/provider.ts'
 import { SecretBox } from './secrets.ts'
@@ -22,7 +23,8 @@ const secrets = SecretBox.load(config.SECRET_KEY, dataDir, log)
 const events = new Events()
 const github = new GithubProvider(config, store, secrets, createLogger('github'))
 const gitlab = new GitlabProvider(config, store, secrets, createLogger('gitlab'))
-const providers = [github, gitlab]
+const azuredevops = new AzureDevopsProvider(config, store, secrets, createLogger('azuredevops'))
+const providers = [github, gitlab, azuredevops]
 const estate = new Estate(store, providers)
 const scheduler = new Scheduler(providers, store, estate, events, config, createLogger('sync'))
 const orrery = new OrreryPusher(config, store, estate, events, createLogger('orrery'))
@@ -37,6 +39,7 @@ const app = createApp({
   providers,
   github,
   gitlab,
+  azuredevops,
   log: createLogger('http'),
   webDir: existsSync(webDir) ? webDir : null,
 })

@@ -90,6 +90,15 @@ export function useSaveGitlabApp() {
   })
 }
 
+export function useSaveAzureDevopsApp() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (app: { tenantId: string; clientId: string; clientSecret: string; organizations: string[] }) =>
+      call<SettingsResponse>('/api/azuredevops/app', { method: 'POST', body: JSON.stringify(app) }),
+    onSuccess: (settings) => client.setQueryData(keys.settings, settings),
+  })
+}
+
 /** Keeps queries fresh from the server's event stream. */
 export function useLiveUpdates(client: QueryClient): void {
   useEffect(() => {

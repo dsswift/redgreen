@@ -14,7 +14,7 @@ Per repo, per pipeline:
 - the latest run on the default branch
 - scheduled pipelines that stopped firing, or that the forge switched off
 - the build of the newest release or tag
-- open critical Dependabot and code scanning alerts
+- open critical dependency and code scanning alerts
 - failing checks on open pull requests
 
 Each of these is a rule. Every rule has a severity you set: red, amber, info,
@@ -25,9 +25,10 @@ last push, latest releases, success rate, and how long a repo has been red.
 
 ## Providers
 
-GitHub and GitLab are the providers today. The estate model is provider-neutral:
-an account, a repo, a pipeline, a run, a release. Azure DevOps is added by
-writing a new provider behind the same interface. Nothing else changes.
+GitHub, GitLab, and Azure DevOps are the providers today. The estate model is
+provider-neutral: an account, a repo, a pipeline, a run, a release. Another
+forge is added by writing a new provider behind the same interface. Nothing
+else changes.
 
 GitHub is read through a GitHub App you create from the settings page in one
 click. Webhooks refresh a repo within seconds of a run finishing; a sweep every
@@ -52,6 +53,28 @@ release events.
 A GitLab project shows as one pipeline plus one per pipeline schedule.
 Vulnerability counts need GitLab Ultimate; on other tiers the security feeds
 read "not available".
+
+Azure DevOps is read as a service principal: an application you register in
+Microsoft Entra, with a client secret. The organization must be connected to
+that Entra tenant. Add the application to the organization as a user with Basic
+access, and to the Readers group of each project you want on the board. Then
+enter its tenant, id, secret, and the organization names on the settings page,
+or set them in the environment. An organization you name shows at once; there
+is nothing to approve, since naming it is the approval.
+
+An organization is one account. Each repository shows one pipeline per build
+definition that builds it. A schedule is watched for missed runs only when it
+fires whether or not the branch changed: `always: true` in YAML, or "only
+schedule builds if the source or pipeline has changed" switched off in the
+editor. A pull request's checks are the builds of its merge ref. Alert counts
+need GitHub Advanced Security for Azure DevOps on the repository; without it
+the security feeds read "not available". A disabled repository shows as
+archived.
+
+Azure DevOps has no releases, stars, or per-repository issues, so those read
+empty. It sends an ETag on few resources, so a sweep is answered in full and
+counts against the organization's throttle. There are no webhooks yet; the
+sweep does the work.
 
 ## Run it
 
@@ -87,6 +110,8 @@ Configuration is by environment variable:
 | `GITLAB_CLIENT_ID`, `GITLAB_CLIENT_SECRET` | | OAuth application from the environment, instead of the settings page; authorizing still happens in the browser |
 | `GITLAB_WEBHOOK_SECRET` | generated | Secret token expected on GitLab webhooks |
 | `GITLAB_TOKEN`, `GITLAB_TOKEN_ACCOUNTS` | | Access token mode for local runs |
+| `AZURE_DEVOPS_TENANT_ID`, `AZURE_DEVOPS_CLIENT_ID`, `AZURE_DEVOPS_CLIENT_SECRET` | | Service principal from the environment, instead of the settings page |
+| `AZURE_DEVOPS_ORGANIZATIONS` | | Organization names the service principal reads; required with the three above |
 
 There is no login of its own. Put it behind your own gate (oauth2-proxy, a VPN,
 a LAN) and leave `POST /api/webhooks/github`, `POST /api/webhooks/gitlab`, and

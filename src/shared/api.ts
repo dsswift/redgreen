@@ -115,6 +115,14 @@ export interface GitlabSetup {
   webhookSecret: string | null
 }
 
+/** What the settings page needs to connect Azure DevOps. */
+export interface AzureDevopsSetup {
+  /** The service principal redgreen signs in as, or null until one is entered. The secret never leaves the server. */
+  app: { source: 'environment' | 'setup'; tenantId: string; clientId: string } | null
+  /** Organizations it reads. */
+  organizations: string[]
+}
+
 export interface SettingsResponse {
   rules: RuleSeverities
   defaults: RuleSeverities
@@ -125,6 +133,7 @@ export interface SettingsResponse {
     /** Suggested app name for the GitHub setup form. */
     githubAppName: string
     gitlab: GitlabSetup
+    azuredevops: AzureDevopsSetup
   }
 }
 

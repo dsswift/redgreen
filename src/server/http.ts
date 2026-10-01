@@ -9,6 +9,7 @@ import type { Config } from './config.ts'
 import type { Estate } from './estate.ts'
 import type { Events } from './events.ts'
 import type { Logger } from './log.ts'
+import type { AzureDevopsProvider } from './providers/azuredevops/provider.ts'
 import type { GithubProvider } from './providers/github/provider.ts'
 import type { GitlabProvider } from './providers/gitlab/provider.ts'
 import type { Provider } from './providers/provider.ts'
@@ -24,6 +25,7 @@ export interface HttpDeps {
   providers: Provider[]
   github: GithubProvider
   gitlab: GitlabProvider
+  azuredevops: AzureDevopsProvider
   log: Logger
   /** Directory holding the built web app, or null to serve the API only. */
   webDir: string | null
@@ -38,9 +40,15 @@ const repoSettingsSchema = z.object({
 })
 const accountStatusSchema = z.object({ status: z.enum(['active', 'pending', 'ignored']) })
 const gitlabAppSchema = z.object({ clientId: z.string().trim().min(1), clientSecret: z.string().trim().min(1) })
+const azureDevopsAppSchema = z.object({
+  tenantId: z.string().trim().min(1),
+  clientId: z.string().trim().min(1),
+  clientSecret: z.string().trim(),
+  organizations: z.array(z.string().trim().min(1)).min(1),
+})
 
 export function createApp(deps: HttpDeps): Hono {
-  const { config, store, estate, scheduler, events, providers, github, gitlab, log } = deps
+  const { config, store, estate, scheduler, events, providers, github, gitlab, azuredevops, log } = deps
   const app = new Hono()
 
   // Every response is private: the site sits behind a shared CDN, and a copy
@@ -112,6 +120,7 @@ export function createApp(deps: HttpDeps): Hono {
     setup: {
       githubAppName: `redgreen-${new URL(config.PUBLIC_URL).hostname.split('.')[0]}`,
       gitlab: gitlab.setup(),
+      azuredevops: azuredevops.setup(),
     },
   })
 
@@ -175,6 +184,22 @@ export function createApp(deps: HttpDeps): Hono {
     }
     void scheduler.sweep('gitlab authorized')
     return c.redirect('/settings?created=gitlab')
+  })
+
+  // Azure DevOps setup -----------------------------------------------------------
+
+  app.post('/api/azuredevops/app', async (c) => {
+    const parsed = azureDevopsAppSchema.safeParse(await c.req.json())
+    if (!parsed.success) return c.json({ error: parsed.error.message }, 400)
+    try {
+      await azuredevops.saveApp(parsed.data)
+    } catch (error) {
+      // The reason is shown beside the form, so it has to be readable.
+      log.warn('azure devops service principal rejected', { error })
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 400)
+    }
+    void scheduler.sweep('azure devops connected')
+    return c.json(settingsResponse())
   })
 
   // Webhooks -------------------------------------------------------------------

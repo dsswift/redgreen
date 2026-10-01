@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import type { GitlabSetup, ProviderStatus, SettingsResponse } from '../../shared/api.ts'
+import type { AzureDevopsSetup, GitlabSetup, ProviderStatus, SettingsResponse } from '../../shared/api.ts'
 import { PROVIDER_LABELS, type Account } from '../../shared/model.ts'
 import { RULES, RULE_KEYS, type RuleSeverities } from '../../shared/rules.ts'
-import { fetchManifest, useSaveGitlabApp, useSettings, useUpdateAccount, useUpdateRules } from '../api.ts'
+import { fetchManifest, useSaveAzureDevopsApp, useSaveGitlabApp, useSettings, useUpdateAccount, useUpdateRules } from '../api.ts'
 import { untilMinutes } from '../format.ts'
 import { Button, Empty, External, Kicker, Panel, SeveritySelect } from './ui.tsx'
 
@@ -27,16 +27,12 @@ export function Settings() {
         {data.providers.map((p) => (
           <ProviderPanel key={p.kind} provider={p} settings={data} justCreated={justCreated === p.kind} />
         ))}
-        <Panel className="flex flex-col justify-center p-5 opacity-60">
-          <Kicker>Next</Kicker>
-          <p className="mt-2 text-sm text-ink-300">Azure DevOps plugs in here. Same board, same rules; only the provider is new.</p>
-        </Panel>
       </section>
 
       <section>
         <Kicker>Accounts</Kicker>
         {data.accounts.length === 0 ? (
-          <p className="mt-3 text-sm text-ink-400">None yet. Install the GitHub App on an account, or authorize GitLab, and they appear here.</p>
+          <p className="mt-3 text-sm text-ink-400">None yet. Install the GitHub App on an account, authorize GitLab, or connect Azure DevOps, and they appear here.</p>
         ) : (
           <ul className="mt-3 divide-y divide-ink-800 border-y border-ink-700">
             {data.accounts.map((a) => (
@@ -87,6 +83,7 @@ function ProviderPanel({ provider, settings, justCreated }: { provider: Provider
             )}
           </ul>
           {provider.kind === 'gitlab' && <GitlabWebhooks setup={settings.setup.gitlab} />}
+          {provider.kind === 'azuredevops' && settings.setup.azuredevops.app?.source === 'setup' && <AzureDevopsChange setup={settings.setup.azuredevops} />}
           {provider.rateLimits.length > 0 && (
             <ul className="font-mono text-[11px] text-ink-400">
               {provider.rateLimits.map((r) => (
@@ -99,8 +96,10 @@ function ProviderPanel({ provider, settings, justCreated }: { provider: Provider
         </div>
       ) : provider.kind === 'github' ? (
         <GithubSetup suggestedName={settings.setup.githubAppName} publicUrl={settings.publicUrl} />
-      ) : (
+      ) : provider.kind === 'gitlab' ? (
         <GitlabSetupForm setup={settings.setup.gitlab} />
+      ) : (
+        <AzureDevopsSetupForm setup={settings.setup.azuredevops} />
       )}
     </Panel>
   )
@@ -249,6 +248,85 @@ function GitlabWebhooks({ setup }: { setup: GitlabSetup }) {
           </label>
         </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * Azure DevOps is read as a service principal: an Entra application that each
+ * organization lists as a user. There is nothing to authorize in the browser.
+ */
+function AzureDevopsSetupForm({ setup }: { setup: AzureDevopsSetup }) {
+  const save = useSaveAzureDevopsApp()
+  const [tenantId, setTenantId] = useState(setup.app?.tenantId ?? '')
+  const [clientId, setClientId] = useState(setup.app?.clientId ?? '')
+  const [clientSecret, setClientSecret] = useState('')
+  const [organizations, setOrganizations] = useState(setup.organizations.join(', '))
+  const fromEnvironment = setup.app?.source === 'environment'
+  const named = organizations.split(',').map((o) => o.trim()).filter(Boolean)
+  const secretOnFile = setup.app !== null && setup.app.clientId === clientId.trim()
+
+  if (fromEnvironment) {
+    return (
+      <p className="mt-3 text-sm text-ink-300">
+        A service principal is set in the environment, but no organization is named. Set <span className="font-mono text-xs">AZURE_DEVOPS_ORGANIZATIONS</span>.
+      </p>
+    )
+  }
+  return (
+    <form
+      className="mt-3 flex flex-col gap-3 text-sm"
+      onSubmit={(e) => {
+        e.preventDefault()
+        save.mutate({ tenantId: tenantId.trim(), clientId: clientId.trim(), clientSecret: clientSecret.trim(), organizations: named })
+      }}
+    >
+      <p className="text-ink-300">
+        In Microsoft Entra, register an application and give it a client secret. In each organization, which must be connected to that Entra tenant, add the
+        application as a user with Basic access and put it in the Readers group of every project to show. Then paste its details here.
+      </p>
+      <label className="flex flex-col gap-1">
+        <span className={FIELD_LABEL}>Directory (tenant) ID</span>
+        <input value={tenantId} onChange={(e) => setTenantId(e.target.value)} className={FIELD} autoComplete="off" />
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className={FIELD_LABEL}>Application (client) ID</span>
+        <input value={clientId} onChange={(e) => setClientId(e.target.value)} className={FIELD} autoComplete="off" />
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className={FIELD_LABEL}>Client secret{secretOnFile ? ' (leave empty to keep the one on file)' : ''}</span>
+        <input type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} className={FIELD} autoComplete="off" />
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className={FIELD_LABEL}>Organizations (names or URLs, comma separated)</span>
+        <input value={organizations} onChange={(e) => setOrganizations(e.target.value)} className={FIELD} autoComplete="off" />
+      </label>
+      {save.isError && <p className="font-mono text-xs text-red">{save.error.message}</p>}
+      <div>
+        <Button
+          kind="solid"
+          type="submit"
+          disabled={save.isPending || tenantId.trim() === '' || clientId.trim() === '' || named.length === 0 || (clientSecret.trim() === '' && !secretOnFile)}
+        >
+          Connect Azure DevOps
+        </Button>
+      </div>
+      <p className="font-mono text-[10px] text-ink-400">
+        Or set AZURE_DEVOPS_TENANT_ID, AZURE_DEVOPS_CLIENT_ID, AZURE_DEVOPS_CLIENT_SECRET and AZURE_DEVOPS_ORGANIZATIONS in the environment.
+      </p>
+    </form>
+  )
+}
+
+/** The same form, folded away once connected, for adding an organization or replacing an expiring secret. */
+function AzureDevopsChange({ setup }: { setup: AzureDevopsSetup }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="flex flex-col gap-2">
+      <button type="button" onClick={() => setOpen(!open)} className="self-start font-mono text-[10px] uppercase tracking-wide text-ink-400 hover:text-ink-100">
+        {open ? 'Hide' : 'Change'} organizations or credentials
+      </button>
+      {open && <AzureDevopsSetupForm setup={setup} />}
     </div>
   )
 }

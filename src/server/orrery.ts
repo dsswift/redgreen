@@ -33,7 +33,7 @@ export const REPOSITORY_BLUEPRINT = {
   fields: {
     description: { type: 'string', description: 'The repository description.', ...pushed },
     url: { type: 'url', title: 'Repository', ...pushed },
-    provider: { type: 'string', chip: true, description: 'The forge the repository lives on, e.g. github or gitlab.', ...pushed },
+    provider: { type: 'string', chip: true, description: 'The forge the repository lives on, e.g. github, gitlab, or azuredevops.', ...pushed },
     organization: { type: 'string', chip: true, description: 'The account or group the repository lives under.', ...pushed },
     name: { type: 'string', description: 'The repository name without its organization.', ...pushed },
     language: { type: 'string', chip: true, ...pushed },

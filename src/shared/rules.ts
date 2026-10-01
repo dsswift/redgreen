@@ -22,12 +22,12 @@ export const RULES = {
   },
   dependabot_critical: {
     label: 'Critical dependency alerts',
-    description: 'Open critical-severity dependency alerts: Dependabot on GitHub, dependency and container scanning on GitLab.',
+    description: 'Open critical-severity dependency alerts: Dependabot on GitHub, dependency and container scanning on GitLab, dependency scanning on Azure DevOps.',
     defaultSeverity: 'red',
   },
   code_scanning_critical: {
     label: 'Critical code scanning alerts',
-    description: 'Open critical-severity code scanning alerts: code scanning on GitHub, SAST and secret detection on GitLab.',
+    description: 'Open critical-severity code scanning alerts: code scanning on GitHub, SAST and secret detection on GitLab, code and secret scanning on Azure DevOps.',
     defaultSeverity: 'red',
   },
   pr_checks_failing: {
