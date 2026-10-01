@@ -19,6 +19,7 @@ export interface GhRepo {
   stargazers_count: number
   open_issues_count: number
   owner: { id: number; login: string }
+  topics?: string[]
 }
 
 export interface GhWorkflow {

@@ -1,5 +1,5 @@
 import type { Octokit } from 'octokit'
-import type { Pipeline, PullRequest, Release, RepoSnapshot, Run, Schedule } from '../../../shared/model.ts'
+import type { Pipeline, PullRequest, Release, RepoFacts, RepoSnapshot, Run, Schedule } from '../../../shared/model.ts'
 import type { Logger } from '../../log.ts'
 import { isStatus } from '../errors.ts'
 import {
@@ -60,13 +60,14 @@ export async function syncGithubRepo(kit: Octokit, accountId: string, fullName: 
     return base
   }
 
-  const [actionsEnabled, tags, releases, pulls, dependabot, codeScanning] = await Promise.all([
+  const [actionsEnabled, tags, releases, pulls, dependabot, codeScanning, facts] = await Promise.all([
     fetchActionsEnabled(kit, params, log),
     fetchTags(kit, params),
     fetchReleases(kit, params),
     fetchPulls(kit, params),
     fetchDependabot(kit, params, gh.html_url, log),
     fetchCodeScanning(kit, params, gh.html_url, log),
+    fetchFacts(kit, params, gh, log),
   ])
   const listed = await fetchPipelines(kit, params, gh.default_branch, tags, log)
   // Workflows keep reporting "active" after Actions is switched off for the whole repo.
@@ -82,6 +83,7 @@ export async function syncGithubRepo(kit: Octokit, accountId: string, fullName: 
     releases,
     pullRequests,
     security: { dependabot, codeScanning },
+    facts,
   }
 }
 
@@ -137,6 +139,64 @@ async function withChecks(kit: Octokit, params: RepoParams, pulls: GhPull[]): Pr
     updatedAt: pr.updated_at,
     checks: states[i] ?? 'none',
   }))
+}
+
+/** Branch rules, the last commit, and which well-known files exist. Each part degrades to null when unreadable. */
+async function fetchFacts(kit: Octokit, params: RepoParams, gh: GhRepo, log: Logger): Promise<RepoFacts> {
+  const facts: RepoFacts = { topics: gh.topics ?? [], branchProtected: null, requiresReview: null, requiredApprovals: null, requiresCodeOwnerReview: null, hasCodeowners: null, hasReadme: null, hasDockerfile: null, lastCommitter: null, lastCommitAt: null }
+  const tolerate = async <T>(what: string, fn: () => Promise<T>): Promise<T | null> => {
+    try {
+      return await fn()
+    } catch (error) {
+      if (isStatus(error, 403, 404, 409)) {
+        log.debug('repo fact unavailable', { repo: params.repo, what, status: Number((error as { status: number }).status) })
+        return null
+      }
+      throw error
+    }
+  }
+  const [branch, rules, classic, root, dotGithub] = await Promise.all([
+    tolerate('branch', () => kit.request('GET /repos/{owner}/{repo}/branches/{branch}', { ...params, branch: gh.default_branch })),
+    tolerate('rules', () => kit.request('GET /repos/{owner}/{repo}/rules/branches/{branch}', { ...params, branch: gh.default_branch, per_page: 100 })),
+    tolerate('protection', () => kit.request('GET /repos/{owner}/{repo}/branches/{branch}/protection', { ...params, branch: gh.default_branch })),
+    tolerate('root', () => kit.request('GET /repos/{owner}/{repo}/contents/{path}', { ...params, path: '' })),
+    tolerate('.github', () => kit.request('GET /repos/{owner}/{repo}/contents/{path}', { ...params, path: '.github' })),
+  ])
+  if (branch) {
+    const b = branch.data as { protected?: boolean; commit?: { commit?: { author?: { name?: string; date?: string } }; author?: { login?: string } | null } }
+    facts.branchProtected = !!b.protected
+    facts.lastCommitter = b.commit?.author?.login ?? b.commit?.commit?.author?.name ?? null
+    facts.lastCommitAt = b.commit?.commit?.author?.date ?? null
+  }
+  const ruleList = (rules?.data ?? []) as { type: string; parameters?: { required_approving_review_count?: number; require_code_owner_review?: boolean } }[]
+  if (rules) {
+    if (ruleList.length > 0) facts.branchProtected = true
+    const pr = ruleList.find((r) => r.type === 'pull_request')
+    if (pr) {
+      facts.requiresReview = true
+      facts.requiredApprovals = pr.parameters?.required_approving_review_count ?? 0
+      facts.requiresCodeOwnerReview = !!pr.parameters?.require_code_owner_review
+    } else {
+      facts.requiresReview = false
+    }
+  }
+  if (classic) {
+    const reviews = (classic.data as { required_pull_request_reviews?: { required_approving_review_count?: number; require_code_owner_reviews?: boolean } }).required_pull_request_reviews
+    if (reviews) {
+      facts.requiresReview = true
+      facts.requiredApprovals = Math.max(facts.requiredApprovals ?? 0, reviews.required_approving_review_count ?? 0)
+      facts.requiresCodeOwnerReview = !!facts.requiresCodeOwnerReview || !!reviews.require_code_owner_reviews
+    }
+  }
+  const names = (listing: { data: unknown } | null) => (Array.isArray(listing?.data) ? (listing.data as { name: string }[]).map((f) => f.name.toLowerCase()) : null)
+  const rootNames = names(root)
+  const githubNames = names(dotGithub) ?? []
+  if (rootNames) {
+    facts.hasReadme = rootNames.some((n) => n.startsWith('readme'))
+    facts.hasDockerfile = rootNames.some((n) => n === 'dockerfile' || n.endsWith('.dockerfile'))
+    facts.hasCodeowners = rootNames.includes('codeowners') || githubNames.includes('codeowners')
+  }
+  return facts
 }
 
 /** Whether Actions is switched on for the repo, or null when the installation may not read the setting. */

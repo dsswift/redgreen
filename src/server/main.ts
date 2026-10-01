@@ -6,6 +6,7 @@ import { Estate } from './estate.ts'
 import { Events } from './events.ts'
 import { createApp } from './http.ts'
 import { createLogger } from './log.ts'
+import { OrreryPusher } from './orrery.ts'
 import { GithubProvider } from './providers/github/provider.ts'
 import { GitlabProvider } from './providers/gitlab/provider.ts'
 import { SecretBox } from './secrets.ts'
@@ -24,6 +25,7 @@ const gitlab = new GitlabProvider(config, store, secrets, createLogger('gitlab')
 const providers = [github, gitlab]
 const estate = new Estate(store, providers)
 const scheduler = new Scheduler(providers, store, estate, events, config, createLogger('sync'))
+const orrery = new OrreryPusher(config, store, estate, events, createLogger('orrery'))
 
 const webDir = resolve(import.meta.dirname, '../../dist/web')
 const app = createApp({
@@ -42,12 +44,14 @@ const app = createApp({
 const server = serve({ fetch: app.fetch, port: config.PORT, hostname: config.HOST }, (info) => {
   log.info('listening', { host: info.address, port: info.port, publicUrl: config.PUBLIC_URL, web: existsSync(webDir), dataDir })
   scheduler.start()
+  orrery.start()
 })
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
     log.info('shutting down', { signal })
     scheduler.stop()
+    orrery.stop()
     server.close(() => {
       store.close()
       process.exit(0)

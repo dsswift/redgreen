@@ -101,6 +101,20 @@ export interface AlertCounts {
   url: string
 }
 
+/** Facts about the repository itself, for catalogs that list it as a service. Null where the forge does not say. */
+export interface RepoFacts {
+  topics: string[]
+  branchProtected: boolean | null
+  requiresReview: boolean | null
+  requiredApprovals: number | null
+  requiresCodeOwnerReview: boolean | null
+  hasCodeowners: boolean | null
+  hasReadme: boolean | null
+  hasDockerfile: boolean | null
+  lastCommitter: string | null
+  lastCommitAt: string | null
+}
+
 export interface RepoSnapshot {
   id: string
   provider: ProviderKind
@@ -126,5 +140,7 @@ export interface RepoSnapshot {
     dependabot: AlertCounts | null
     codeScanning: AlertCounts | null
   }
+  /** Absent on snapshots taken before facts were collected, and for forges that do not provide them yet. */
+  facts?: RepoFacts | null
   syncedAt: string
 }
