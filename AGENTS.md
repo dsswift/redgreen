@@ -18,7 +18,9 @@ Estate health board. Read `README.md` first.
 - `server/orrery.ts` pushes every repo to an Orrery hub as a `repository`
   entity when `ORRERY_URL` and `ORRERY_TOKEN` are set. `toRepository` is the
   only place the mapping lives, and `REPOSITORY_BLUEPRINT` beside it is what
-  the hub is offered: a field written must be defined there. It speaks plain
+  the hub is offered: a field written must be defined there. `toDeployments`
+  and `DEPLOYMENT_BLUEPRINT` do the same for the deployments a forge records.
+  A provider that reads none leaves `deployments` off its snapshot. It speaks plain
   HTTP; do not add an SDK.
 - Health is computed at read time from stored snapshots in
   `server/health/evaluate.ts`. Changing a rule never needs a resync.

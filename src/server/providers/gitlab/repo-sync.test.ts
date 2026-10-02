@@ -60,6 +60,10 @@ function fakeClient(over: Record<string, unknown> = {}, project = PROJECT): Gitl
       pipeline({ id: 1 }),
     ],
     'projects/42/pipeline_schedules': [SCHEDULE],
+    'projects/42/deployments': [
+      { id: 9, ref: 'main', sha: 'abc', status: 'success', created_at: '2026-09-30T01:00:00Z', updated_at: '2026-09-30T01:04:00Z', environment: { name: 'production' }, user: { username: 'dev' }, deployable: { finished_at: '2026-09-30T01:03:00Z', web_url: 'https://gitlab.example.org/job/9' } },
+      { id: 8, ref: 'main', sha: 'abb', status: 'running', created_at: '2026-09-30T00:00:00Z', updated_at: '2026-09-30T00:01:00Z', environment: { name: 'production' }, user: null, deployable: null },
+    ],
     'projects/42/pipeline_schedules/5/pipelines': [pipeline({ id: 2, source: 'schedule', created_at: '2026-09-30T02:00:00Z' })],
     ...over,
   }
@@ -102,6 +106,15 @@ describe('syncGitlabRepo', () => {
     expect(nightly).toMatchObject({ name: 'Nightly', state: 'enabled', schedules: [{ cron: '0 2 * * *', timezone: 'Europe/London' }] })
     expect(nightly?.runs.map((r) => r.trigger)).toEqual(['schedule'])
     expect(snapshot.pullRequests[0]).toMatchObject({ number: 11, checks: 'failure', author: 'dev' })
+  })
+
+  it('reads the deployments the project recorded, and none where the feature is off', async () => {
+    const snapshot = await syncGitlabRepo(fakeClient(), 'gitlab:9', 42, log)
+    expect(snapshot.deployments).toEqual([
+      { id: '9', environment: 'production', status: 'succeeded', ref: 'main', sha: 'abc', createdAt: '2026-09-30T01:00:00Z', finishedAt: '2026-09-30T01:03:00Z', url: 'https://gitlab.example.org/job/9', actor: 'dev' },
+      { id: '8', environment: 'production', status: 'running', ref: 'main', sha: 'abb', createdAt: '2026-09-30T00:00:00Z', finishedAt: null, url: null, actor: null },
+    ])
+    expect((await syncGitlabRepo(fakeClient({ 'projects/42/deployments': 403 }), 'gitlab:9', 42, log)).deployments).toBeNull()
   })
 
   it('marks every pipeline disabled when CI is switched off for the project', async () => {

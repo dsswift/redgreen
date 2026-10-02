@@ -1,7 +1,9 @@
 // Pushes every repository to an Orrery hub as a `repository` entity, so the
-// catalog there lists what this board watches. The blueprint travels with
-// the push and is offered to the hub first. One snapshot run per account; a
-// single repo is patched as soon as it syncs.
+// catalog there lists what this board watches, and every finished deployment
+// the forge recorded as a `deployment` entity. The blueprints travel with the
+// push and are offered to the hub first. Repositories go as one snapshot run
+// per account, and a single repo is patched as soon as it syncs. Deployments
+// only accumulate, so they go in an incremental run of their own.
 
 import type { RepoSnapshot } from '../shared/model.ts'
 import type { Level, RepoHealth } from '../shared/rules.ts'
@@ -18,8 +20,18 @@ export interface RepositoryEntity {
   fields: Record<string, unknown>
 }
 
+export interface DeploymentEntity {
+  blueprint: 'deployment'
+  key: string
+  title: string
+  fields: Record<string, unknown>
+  relations: { repository: string }
+}
+
 const pushed = { overridable: false }
 const LEVELS = ['red', 'amber', 'green', 'grey']
+const SUCCEEDED = { field: 'status', op: 'eq', value: 'succeeded' }
+const FAILED = { field: 'status', op: 'eq', value: 'failed' }
 
 /** What `toRepository` writes. The hub creates it when it has none and leaves an existing one as it is. */
 export const REPOSITORY_BLUEPRINT = {
@@ -74,6 +86,61 @@ export const REPOSITORY_BLUEPRINT = {
     notes: { type: 'markdown' },
   },
   relations: {},
+}
+
+/** What a repository can say once the hub holds deployments that point at it. Offered after the deployment blueprint is accepted, because these read through it. */
+const REPOSITORY_DEPLOYMENT_FIELDS = {
+  id: 'repository',
+  title: 'Repository',
+  fields: {
+    last_deployed_at: { type: 'datetime', title: 'Last deployed', aggregation: { relation: '<-deployment:repository', fn: 'max', field: 'deployed_at', where: SUCCEEDED } },
+    deployments_30d: { type: 'number', title: 'Deployments (30d)', aggregation: { relation: '<-deployment:repository', fn: 'count', where: SUCCEEDED, window: { field: 'deployed_at', last: '30d' } } },
+    failed_deployments_30d: { type: 'number', title: 'Failed deployments (30d)', aggregation: { relation: '<-deployment:repository', fn: 'count', where: FAILED, window: { field: 'deployed_at', last: '30d' } } },
+    deployments_per_week: { type: 'number', title: 'Deployments per week', description: 'Successful deployments per week over the last 90 days.', aggregation: { relation: '<-deployment:repository', fn: 'count', where: SUCCEEDED, window: { field: 'deployed_at', last: '90d' }, per: 'week' } },
+    change_failure_rate: { type: 'number', title: 'Change failure rate (%)', description: "The share of the last 30 days' deployments that failed.", calculation: 'deployments_30d + failed_deployments_30d > 0 ? round(failed_deployments_30d / (deployments_30d + failed_deployments_30d) * 100) : null' },
+  },
+}
+
+/** What `toDeployments` writes. A hub that already has a deployment blueprint from another pusher gains the fields and the relation it lacks. */
+export const DEPLOYMENT_BLUEPRINT = {
+  id: 'deployment',
+  title: 'Deployment',
+  group: 'Catalog',
+  description:
+    'One time a version was rolled out. These come from the deployments a forge records when a pipeline job names an environment. Deployments only accumulate, so they leave by age. Count them over a window to see how often and how reliably something deploys.',
+  icon: 'rocket',
+  canvas: { default: 'hidden' },
+  lifecycle: { expire: { after: '180d', field: 'deployed_at' } },
+  fields: {
+    status: { type: 'enum', values: ['succeeded', 'failed'], ...pushed },
+    environment_name: { type: 'string', chip: true, title: 'Environment', description: 'The environment as the forge names it.', ...pushed },
+    revision: { type: 'string', description: 'The commit that was deployed.', ...pushed },
+    ref: { type: 'string', description: 'The branch or tag it was deployed from.', ...pushed },
+    deployed_at: { type: 'datetime', description: 'When it finished.', ...pushed },
+    started_at: { type: 'datetime', ...pushed },
+    duration_seconds: { type: 'number', title: 'Duration (s)', ...pushed },
+    initiated_by: { type: 'string', description: 'Who started it.', ...pushed },
+    url: { type: 'url', title: 'Open', ...pushed },
+  },
+  relations: {
+    repository: { target: 'repository', many: false, title: 'Repository', inverseTitle: 'Deployments' },
+  },
+}
+
+const repositoryKey = (repo: Pick<RepoSnapshot, 'provider' | 'fullName'>) => `${repo.provider}/${repo.fullName}`.toLowerCase()
+
+/** Every deployment of a repo that reached an end. One still running is left for the sweep after it finishes. Pure, so it is tested without a hub. */
+export function toDeployments(repo: RepoSnapshot): DeploymentEntity[] {
+  const key = repositoryKey(repo)
+  return (repo.deployments ?? [])
+    .filter((d) => (d.status === 'succeeded' || d.status === 'failed') && d.finishedAt !== null)
+    .map((d) => {
+      const seconds = (Date.parse(d.finishedAt!) - Date.parse(d.createdAt)) / 1000
+      const fields: Record<string, unknown> = { status: d.status, environment_name: d.environment, revision: d.sha, ref: d.ref, deployed_at: d.finishedAt, started_at: d.createdAt, initiated_by: d.actor }
+      if (Number.isFinite(seconds) && seconds >= 0) fields.duration_seconds = Math.round(seconds)
+      if (d.url) fields.url = d.url
+      return { blueprint: 'deployment', key: `${key}/${d.id}`, title: `${repo.name} to ${d.environment}`, fields, relations: { repository: key } }
+    })
 }
 
 const LEVEL: Record<Level, string> = { red: 'red', amber: 'amber', green: 'green', quiet: 'grey', unknown: 'grey' }
@@ -133,7 +200,7 @@ export function toRepository(repo: RepoSnapshot, account: Pick<AccountRow, 'logi
       last_commit_at: repo.facts.lastCommitAt,
     })
   }
-  return { blueprint: 'repository', key: `${repo.provider}/${repo.fullName}`.toLowerCase(), title: repo.name, fields }
+  return { blueprint: 'repository', key: repositoryKey(repo), title: repo.name, fields }
 }
 
 export class OrreryPusher {
@@ -145,6 +212,8 @@ export class OrreryPusher {
   private readonly events: Events
   private readonly log: Logger
   private offered = false
+  /** False when the hub refused the deployment blueprint: the source is not registered for it. */
+  private deployments = false
   private timer: NodeJS.Timeout | null = null
   private unsubscribe: (() => void) | null = null
 
@@ -197,13 +266,22 @@ export class OrreryPusher {
   private async offer(): Promise<boolean> {
     if (this.offered) return true
     try {
-      const res = (await this.call('PUT', '/ingest/blueprints', { blueprints: [REPOSITORY_BLUEPRINT] })) as { created?: string[]; rejected?: { reason: string }[] }
-      if (res.rejected?.length) {
-        this.log.error('orrery refused the repository blueprint', { reason: res.rejected[0]?.reason })
+      const res = (await this.call('PUT', '/ingest/blueprints', { blueprints: [REPOSITORY_BLUEPRINT, DEPLOYMENT_BLUEPRINT] })) as { created?: string[]; extended?: string[]; rejected?: { blueprint: string; reason: string }[] }
+      // Repositories are the point; a hub that will not take deployments still gets them.
+      const refused = res.rejected?.find((r) => r.blueprint === 'repository')
+      if (refused) {
+        this.log.error('orrery refused the repository blueprint', { reason: refused.reason })
         return false
       }
+      const deployments = res.rejected?.find((r) => r.blueprint === 'deployment')
+      this.deployments = !deployments
+      if (deployments) this.log.warn('orrery refused the deployment blueprint; deployments are not pushed', { reason: deployments.reason })
+      else {
+        const counted = (await this.call('PUT', '/ingest/blueprints', { blueprints: [REPOSITORY_DEPLOYMENT_FIELDS] })) as { rejected?: { reason: string }[] }
+        if (counted.rejected?.length) this.log.warn('orrery refused the deployment counts on repository; deployments are pushed without them', { reason: counted.rejected[0]?.reason })
+      }
       this.offered = true
-      this.log.info('orrery blueprint offered', { created: res.created?.length === 1 })
+      this.log.info('orrery blueprints offered', { created: res.created ?? [], extended: res.extended ?? [], deployments: this.deployments })
       return true
     } catch (error) {
       this.log.error('orrery blueprint offer failed', { error })
@@ -250,9 +328,29 @@ export class OrreryPusher {
         }
         await this.call('POST', `/ingest/runs/${encodeURIComponent(run.id)}/commit`)
         this.log.info('orrery push done', { reason, account: account.login, mode, repositories: entities.length, unsynced: mine.length - synced.length, rejected })
+        await this.pushDeployments(account.login, scope, synced.flatMap((r) => toDeployments(r.snapshot!)))
       } catch (error) {
         this.log.error('orrery push failed', { reason, account: account.login, error })
       }
     }
+  }
+
+  /** Deployments never leave a forge's list in order, so the run is incremental: the hub keeps each one until it expires. */
+  private async pushDeployments(account: string, scope: string, entities: DeploymentEntity[]): Promise<void> {
+    if (!this.deployments || entities.length === 0) {
+      this.log.debug('no deployments pushed', { account, accepted: this.deployments, found: entities.length })
+      return
+    }
+    const run = (await this.call('POST', '/ingest/runs', { mode: 'incremental', scope: `${scope}/deployments` })) as { id: string }
+    let rejected = 0
+    for (let i = 0; i < entities.length; i += 100) {
+      const res = (await this.call('PUT', `/ingest/runs/${encodeURIComponent(run.id)}/entities`, { entities: entities.slice(i, i + 100) })) as { rejected?: { key?: string; field?: string; reason: string }[] }
+      for (const r of res.rejected ?? []) {
+        rejected++
+        this.log.warn('orrery rejected a deployment', { key: r.key, field: r.field, reason: r.reason })
+      }
+    }
+    await this.call('POST', `/ingest/runs/${encodeURIComponent(run.id)}/commit`)
+    this.log.info('orrery deployments pushed', { account, deployments: entities.length, rejected })
   }
 }

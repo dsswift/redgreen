@@ -1,5 +1,5 @@
 import type { Octokit } from 'octokit'
-import type { Pipeline, PullRequest, Release, RepoFacts, RepoSnapshot, Run, Schedule } from '../../../shared/model.ts'
+import type { Deployment, Pipeline, PullRequest, Release, RepoFacts, RepoSnapshot, Run, Schedule } from '../../../shared/model.ts'
 import type { Logger } from '../../log.ts'
 import { isStatus } from '../errors.ts'
 import {
@@ -7,6 +7,7 @@ import {
   codeScanningCounts,
   dependabotCounts,
   pipelineState,
+  toDeployment,
   toPipeline,
   toRun,
   visibility,
@@ -14,6 +15,8 @@ import {
   type GhCodeScanningAlert,
   type GhCombinedStatus,
   type GhDependabotAlert,
+  type GhDeployment,
+  type GhDeploymentStatus,
   type GhPull,
   type GhRelease,
   type GhRepo,
@@ -24,6 +27,8 @@ import { parseSchedules } from './workflow-file.ts'
 
 /** Runs kept per pipeline. Enough to see a failing streak and a sparkline. */
 const RUNS_PER_PIPELINE = 30
+/** Deployments whose status is looked up, one call each. */
+const DEPLOYMENTS_KEPT = 15
 /** Open pull requests whose checks are looked up. The rest are counted only. */
 const PR_CHECKS_LIMIT = 20
 
@@ -60,7 +65,7 @@ export async function syncGithubRepo(kit: Octokit, accountId: string, fullName: 
     return base
   }
 
-  const [actionsEnabled, tags, releases, pulls, dependabot, codeScanning, facts] = await Promise.all([
+  const [actionsEnabled, tags, releases, pulls, dependabot, codeScanning, facts, deployments] = await Promise.all([
     fetchActionsEnabled(kit, params, log),
     fetchTags(kit, params),
     fetchReleases(kit, params),
@@ -68,6 +73,7 @@ export async function syncGithubRepo(kit: Octokit, accountId: string, fullName: 
     fetchDependabot(kit, params, gh.html_url, log),
     fetchCodeScanning(kit, params, gh.html_url, log),
     fetchFacts(kit, params, gh, log),
+    fetchDeployments(kit, params, log),
   ])
   const listed = await fetchPipelines(kit, params, gh.default_branch, tags, log)
   // Workflows keep reporting "active" after Actions is switched off for the whole repo.
@@ -84,6 +90,26 @@ export async function syncGithubRepo(kit: Octokit, accountId: string, fullName: 
     pullRequests,
     security: { dependabot, codeScanning },
     facts,
+    deployments,
+  }
+}
+
+/** Deployments exist where a workflow job names an environment. The list carries no outcome, so each one's statuses are read too. */
+async function fetchDeployments(kit: Octokit, params: RepoParams, log: Logger): Promise<Deployment[] | null> {
+  try {
+    const { data } = await kit.request('GET /repos/{owner}/{repo}/deployments', { ...params, per_page: DEPLOYMENTS_KEPT })
+    return await Promise.all(
+      (data as GhDeployment[]).map(async (d) => {
+        const statuses = await kit.request('GET /repos/{owner}/{repo}/deployments/{deployment_id}/statuses', { ...params, deployment_id: d.id, per_page: 10 })
+        return toDeployment(d, statuses.data as GhDeploymentStatus[])
+      }),
+    )
+  } catch (error) {
+    if (isStatus(error, 403, 404)) {
+      log.debug('deployments unavailable', { repo: params.repo, status: Number((error as { status: number }).status) })
+      return null
+    }
+    throw error
   }
 }
 

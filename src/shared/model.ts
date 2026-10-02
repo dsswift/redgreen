@@ -83,6 +83,21 @@ export interface Release {
   prerelease: boolean
 }
 
+/** One rollout the forge recorded against a named environment. */
+export interface Deployment {
+  id: string
+  /** The environment as the forge names it: production, staging. */
+  environment: string
+  status: 'succeeded' | 'failed' | 'running' | 'other'
+  ref: string | null
+  sha: string
+  createdAt: string
+  /** When it reached a final status. Null while it runs. */
+  finishedAt: string | null
+  url: string | null
+  actor: string | null
+}
+
 export type ChecksState = 'success' | 'failure' | 'pending' | 'none'
 
 export interface PullRequest {
@@ -142,5 +157,7 @@ export interface RepoSnapshot {
   }
   /** Absent on snapshots taken before facts were collected, and for forges that do not provide them yet. */
   facts?: RepoFacts | null
+  /** Recent deployments, newest first. Null when the forge keeps none for the repo or will not show them; absent on older snapshots and for forges not read yet. */
+  deployments?: Deployment[] | null
   syncedAt: string
 }

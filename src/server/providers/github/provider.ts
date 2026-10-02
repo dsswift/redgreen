@@ -133,6 +133,7 @@ export class GithubProvider implements Provider {
           administration: 'read',
           checks: 'read',
           contents: 'read',
+          deployments: 'read',
           issues: 'read',
           metadata: 'read',
           pull_requests: 'read',

@@ -1,7 +1,7 @@
 // Shapes of the GitHub REST responses redgreen reads, and their mapping onto
 // the estate model. Only the fields used are declared.
 
-import type { AlertCounts, ChecksState, Pipeline, PipelineState, Run, RunConclusion, RunTrigger, Schedule } from '../../../shared/model.ts'
+import type { AlertCounts, ChecksState, Deployment, Pipeline, PipelineState, Run, RunConclusion, RunTrigger, Schedule } from '../../../shared/model.ts'
 
 export interface GhRepo {
   id: number
@@ -46,6 +46,38 @@ export interface GhRun {
   updated_at: string
   html_url: string
   actor: { login: string } | null
+}
+
+export interface GhDeployment {
+  id: number
+  sha: string
+  ref: string
+  environment: string
+  created_at: string
+  creator: { login: string } | null
+}
+
+export interface GhDeploymentStatus {
+  state: string
+  created_at: string
+  log_url?: string | null
+}
+
+/** A deployment's standing is its newest status that says how it ended. A later "inactive" only means a newer deployment replaced it. */
+export function toDeployment(d: GhDeployment, statuses: GhDeploymentStatus[]): Deployment {
+  const final = statuses.find((s) => s.state === 'success' || s.state === 'failure' || s.state === 'error')
+  const running = statuses.some((s) => s.state === 'in_progress' || s.state === 'queued' || s.state === 'pending')
+  return {
+    id: String(d.id),
+    environment: d.environment,
+    status: final ? (final.state === 'success' ? 'succeeded' : 'failed') : running ? 'running' : 'other',
+    ref: d.ref || null,
+    sha: d.sha,
+    createdAt: d.created_at,
+    finishedAt: final?.created_at ?? null,
+    url: final?.log_url ?? null,
+    actor: d.creator?.login ?? null,
+  }
 }
 
 export interface GhRelease {

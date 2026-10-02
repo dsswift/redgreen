@@ -45,8 +45,9 @@ const RUN = {
 }
 
 /** Answers the routes a repo sync reads; `permissions` is the Actions permissions response or an HTTP status to fail with. */
-function fakeKit(permissions: { enabled: boolean } | number): Octokit {
+function fakeKit(permissions: { enabled: boolean } | number, extra: Record<string, unknown> = {}): Octokit {
   const routes: Record<string, unknown> = {
+    ...extra,
     'GET /repos/{owner}/{repo}': REPO,
     'GET /repos/{owner}/{repo}/tags': [],
     'GET /repos/{owner}/{repo}/releases': [],
@@ -83,6 +84,15 @@ describe('syncGithubRepo', () => {
     const snapshot = await syncGithubRepo(fakeKit({ enabled: false }), 'github:10', 'acme/mirror', log)
     expect(snapshot.pipelines.map((p) => p.state)).toEqual(['disabled'])
     expect(snapshot.pipelines[0]?.runs).toHaveLength(1)
+  })
+
+  it('reads each deployment with how it ended, and none for a repo that has no environments', async () => {
+    const deployments = [{ id: 5, sha: 'abc', ref: 'main', environment: 'production', created_at: '2026-09-30T01:00:00Z', creator: { login: 'dev' } }]
+    // A newer deployment marks this one inactive; how it ended is the status before that.
+    const statuses = [{ state: 'inactive', created_at: '2026-09-30T05:00:00Z' }, { state: 'success', created_at: '2026-09-30T01:02:00Z', log_url: 'https://example.org/log' }, { state: 'in_progress', created_at: '2026-09-30T01:00:05Z' }]
+    const kit = fakeKit({ enabled: true }, { 'GET /repos/{owner}/{repo}/deployments': deployments, 'GET /repos/{owner}/{repo}/deployments/{deployment_id}/statuses': statuses })
+    expect((await syncGithubRepo(kit, 'github:10', 'acme/mirror', log)).deployments).toEqual([{ id: '5', environment: 'production', status: 'succeeded', ref: 'main', sha: 'abc', createdAt: '2026-09-30T01:00:00Z', finishedAt: '2026-09-30T01:02:00Z', url: 'https://example.org/log', actor: 'dev' }])
+    expect((await syncGithubRepo(fakeKit({ enabled: true }), 'github:10', 'acme/mirror', log)).deployments).toBeNull()
   })
 
   it('keeps pipelines enabled when Actions is on', async () => {

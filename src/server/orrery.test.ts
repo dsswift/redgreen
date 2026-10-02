@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { RepoSnapshot, Run } from '../shared/model.ts'
 import type { RepoHealth } from '../shared/rules.ts'
-import { REPOSITORY_BLUEPRINT, toRepository } from './orrery.ts'
+import { DEPLOYMENT_BLUEPRINT, REPOSITORY_BLUEPRINT, toDeployments, toRepository } from './orrery.ts'
 
 const run = (conclusion: Run['conclusion'], ref = 'main'): Run => ({ id: 'r', number: 1, title: 't', trigger: 'push', ref, sha: 's', status: 'completed', conclusion, createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z', url: 'u', actor: null })
 
@@ -54,5 +54,21 @@ describe('toRepository', () => {
   it('writes only fields the blueprint it offers defines', () => {
     const s = toRepository(repo, { login: 'Example' }, null, 'b')
     expect(Object.keys(s.fields).filter((f) => !(f in REPOSITORY_BLUEPRINT.fields))).toEqual([])
+  })
+})
+
+describe('toDeployments', () => {
+  const deployment = (id: string, status: 'succeeded' | 'failed' | 'running' | 'other', finishedAt: string | null) => ({ id, environment: 'production', status, ref: 'main', sha: 'abc', createdAt: '2026-09-20T10:00:00Z', finishedAt, url: null, actor: 'dev' })
+
+  it('shapes each finished deployment and points it at its repository', () => {
+    const out = toDeployments({ ...repo, deployments: [deployment('7', 'succeeded', '2026-09-20T10:01:30Z'), deployment('8', 'failed', '2026-09-21T10:00:10Z'), deployment('9', 'running', null), deployment('10', 'other', null)] })
+    expect(out.map((d) => d.key)).toEqual(['github/example/payments/7', 'github/example/payments/8'])
+    expect(out[0]).toMatchObject({ blueprint: 'deployment', title: 'Payments to production', relations: { repository: 'github/example/payments' }, fields: { status: 'succeeded', environment_name: 'production', revision: 'abc', deployed_at: '2026-09-20T10:01:30Z', duration_seconds: 90, initiated_by: 'dev' } })
+    expect(Object.keys(out[0]!.fields).filter((f) => !(f in DEPLOYMENT_BLUEPRINT.fields))).toEqual([])
+  })
+
+  it('has nothing to say for a forge that keeps no deployments', () => {
+    expect(toDeployments({ ...repo, deployments: null })).toEqual([])
+    expect(toDeployments(repo)).toEqual([])
   })
 })

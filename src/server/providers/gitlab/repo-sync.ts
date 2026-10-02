@@ -1,14 +1,16 @@
-import type { Pipeline, PullRequest, Release, RepoSnapshot, Run } from '../../../shared/model.ts'
+import type { Deployment, Pipeline, PullRequest, Release, RepoSnapshot, Run } from '../../../shared/model.ts'
 import type { Logger } from '../../log.ts'
 import { isStatus } from '../errors.ts'
 import type { GitlabClient } from './client.ts'
 import {
   checksState,
   securityCounts,
+  toDeployment,
   toMainPipeline,
   toRun,
   toSchedulePipeline,
   topLanguage,
+  type GlDeployment,
   type GlMergeRequest,
   type GlPipeline,
   type GlProject,
@@ -19,6 +21,8 @@ import {
 
 /** Runs kept per pipeline. Enough to see a failing streak and a sparkline. */
 const RUNS_PER_PIPELINE = 30
+/** Deployments kept per project: enough to cover the gap between sweeps many times over. */
+const DEPLOYMENTS_KEPT = 30
 /** Open merge requests whose head pipeline is looked up. The rest are counted only. */
 const MR_CHECKS_LIMIT = 20
 
@@ -63,12 +67,13 @@ export async function syncGitlabRepo(client: GitlabClient, accountId: string, pr
     return base
   }
 
-  const [language, tags, releases, mergeRequests, security] = await Promise.all([
+  const [language, tags, releases, mergeRequests, security, deployments] = await Promise.all([
     fetchLanguage(client, project.id),
     fetchTags(client, project.id),
     fetchReleases(client, project.id),
     fetchMergeRequests(client, project.id),
     fetchSecurity(client, fullName, log),
+    fetchDeployments(client, project, log),
   ])
   const pipelines = await fetchPipelines(client, project, tags, log)
   const pullRequests = await withChecks(client, project.id, mergeRequests)
@@ -81,6 +86,21 @@ export async function syncGitlabRepo(client: GitlabClient, accountId: string, pr
     releases,
     pullRequests,
     security: securityCounts(security, project.web_url),
+    deployments,
+  }
+}
+
+/** Deployments exist where a job names an environment. A project with the feature off answers 403 or 404. */
+async function fetchDeployments(client: GitlabClient, project: GlProject, log: Logger): Promise<Deployment[] | null> {
+  try {
+    const list = await client.get<GlDeployment[]>(`projects/${project.id}/deployments`, { order_by: 'created_at', sort: 'desc', per_page: DEPLOYMENTS_KEPT })
+    return list.map(toDeployment)
+  } catch (error) {
+    if (isStatus(error, 403, 404)) {
+      log.debug('deployments unavailable', { repo: project.path_with_namespace, status: Number((error as { status: number }).status) })
+      return null
+    }
+    throw error
   }
 }
 

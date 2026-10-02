@@ -1,7 +1,7 @@
 // Shapes of the GitLab REST and GraphQL responses redgreen reads, and their
 // mapping onto the estate model. Only the fields used are declared.
 
-import type { AlertCounts, ChecksState, Pipeline, PipelineState, Run, RunConclusion, RunStatus, RunTrigger, Schedule } from '../../../shared/model.ts'
+import type { AlertCounts, ChecksState, Deployment, Pipeline, PipelineState, Run, RunConclusion, RunStatus, RunTrigger, Schedule } from '../../../shared/model.ts'
 import { RAILS_TIME_ZONES } from './timezones.ts'
 
 export interface GlNamespace {
@@ -205,6 +205,34 @@ function isTimeZone(name: string): boolean {
 }
 
 /** The state of a merge request's head pipeline as a checks state. */
+export interface GlDeployment {
+  id: number
+  ref: string | null
+  sha: string
+  status: string
+  created_at: string
+  updated_at: string
+  environment: { name: string } | null
+  user: { username: string } | null
+  deployable: { finished_at: string | null; web_url?: string } | null
+}
+
+export function toDeployment(d: GlDeployment): Deployment {
+  const status = d.status === 'success' ? 'succeeded' : d.status === 'failed' ? 'failed' : d.status === 'running' || d.status === 'created' ? 'running' : 'other'
+  const done = status === 'succeeded' || status === 'failed'
+  return {
+    id: String(d.id),
+    environment: d.environment?.name ?? 'unknown',
+    status,
+    ref: d.ref,
+    sha: d.sha,
+    createdAt: d.created_at,
+    finishedAt: done ? (d.deployable?.finished_at ?? d.updated_at) : null,
+    url: d.deployable?.web_url ?? null,
+    actor: d.user?.username ?? null,
+  }
+}
+
 export function checksState(status: string | null | undefined): ChecksState {
   switch (status) {
     case null:
