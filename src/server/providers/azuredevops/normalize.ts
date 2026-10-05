@@ -1,6 +1,7 @@
 // Shapes of the Azure DevOps REST responses redgreen reads, and their mapping
 // onto the estate model. Only the fields used are declared.
 
+import { mainLanguage } from '../../../shared/languages.ts'
 import type { AlertCounts, ChecksState, Pipeline, PipelineState, RepoFacts, RepoSnapshot, Run, RunConclusion, RunStatus, RunTrigger, Schedule } from '../../../shared/model.ts'
 import type { FileSchedules } from './pipeline-file.ts'
 import { WINDOWS_TIME_ZONES } from './timezones.ts'
@@ -236,12 +237,12 @@ export function securityCounts(alerts: AdoAlert[], repoUrl: string): { dependabo
   }
 }
 
-/** Dominant programming language per repository id. Entries without a language share are data or binary files. */
+/** Main programming language per repository id. Entries without a language share are data or binary files. */
 export function topLanguages(metrics: AdoLanguageMetrics): Map<string, string | null> {
   return new Map(
     (metrics.repositoryLanguageAnalytics ?? []).map((repo) => {
-      const [top] = (repo.languageBreakdown ?? []).filter((l) => l.languagePercentage !== undefined).sort((a, b) => (b.languagePercentage ?? 0) - (a.languagePercentage ?? 0))
-      return [repo.id, top?.name ?? null]
+      const shares = (repo.languageBreakdown ?? []).flatMap((l) => (l.languagePercentage === undefined ? [] : [[l.name, l.languagePercentage] as const]))
+      return [repo.id, mainLanguage(Object.fromEntries(shares))]
     }),
   )
 }

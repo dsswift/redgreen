@@ -48,6 +48,13 @@ Estate health board. Read `README.md` first.
 - Azure DevOps is read as an Entra service principal. Its tokens last about an
   hour and have no refresh token; the provider asks for the next one itself.
   Never cache one outside `providers/azuredevops/provider.ts`.
+- A repository's language is one of `LANGUAGES` in `shared/languages.ts`,
+  whatever the forge calls it. A provider that reads shares picks with
+  `mainLanguage`; `toRepository` puts every other one through
+  `listedLanguage`. Add a language to the list there, and to `NAMED` when a
+  forge calls it something else.
+- The blueprints offered to the hub leave their fields open. Locking a field
+  is the architect's choice, made in the hub.
 - `package.json` is the version of record. The release tag must match it.
 
 ## Checks

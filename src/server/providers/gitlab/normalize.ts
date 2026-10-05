@@ -1,6 +1,7 @@
 // Shapes of the GitLab REST and GraphQL responses redgreen reads, and their
 // mapping onto the estate model. Only the fields used are declared.
 
+import { mainLanguage } from '../../../shared/languages.ts'
 import type { AlertCounts, ChecksState, Deployment, Pipeline, PipelineState, Run, RunConclusion, RunStatus, RunTrigger, Schedule } from '../../../shared/model.ts'
 import { RAILS_TIME_ZONES } from './timezones.ts'
 
@@ -264,8 +265,7 @@ export function securityCounts(security: GlSecurity | null, projectUrl: string):
   }
 }
 
-/** Dominant language by share of the repository, or null for an empty one. */
+/** The repository's main language from the shares GitLab reports, or null for an empty one. */
 export function topLanguage(languages: Record<string, number>): string | null {
-  const [top] = Object.entries(languages).sort((a, b) => b[1] - a[1])
-  return top ? top[0] : null
+  return mainLanguage(languages)
 }
