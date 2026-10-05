@@ -70,8 +70,8 @@ export async function syncGitlabRepo(client: GitlabClient, accountId: string, pr
   const [language, tags, releases, mergeRequests, security, deployments] = await Promise.all([
     fetchLanguage(client, project.id),
     fetchTags(client, project.id),
-    fetchReleases(client, project.id),
-    fetchMergeRequests(client, project.id),
+    featureOff(() => fetchReleases(client, project.id), [], 'releases', fullName, log),
+    featureOff(() => fetchMergeRequests(client, project.id), [], 'merge requests', fullName, log),
     fetchSecurity(client, fullName, log),
     fetchDeployments(client, project, log),
   ])
@@ -87,6 +87,21 @@ export async function syncGitlabRepo(client: GitlabClient, accountId: string, pr
     pullRequests,
     security: securityCounts(security, project.web_url),
     deployments,
+  }
+}
+
+/**
+ * A project can switch a feature off, such as releases or merge requests, and
+ * GitLab then answers 403 or 404 for it, to an admin too. That is a project
+ * with none of them, not a project that cannot be read.
+ */
+async function featureOff<T>(read: () => Promise<T>, none: T, feature: string, repo: string, log: Logger): Promise<T> {
+  try {
+    return await read()
+  } catch (error) {
+    if (!isStatus(error, 403, 404)) throw error
+    log.debug('feature switched off for project; read as none', { repo, feature, status: Number((error as { status: number }).status) })
+    return none
   }
 }
 

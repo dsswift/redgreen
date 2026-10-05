@@ -142,6 +142,15 @@ describe('syncGitlabRepo', () => {
     expect(snapshot.pipelines[0]?.runs.map((r) => r.id)).toEqual(['8'])
   })
 
+  it('reads a project with releases and merge requests switched off, where GitLab answers 403', async () => {
+    const snapshot = await syncGitlabRepo(fakeClient({ 'projects/42/releases': 403, 'projects/42/merge_requests': 403 }), 'gitlab:group:9', 42, log)
+    expect(snapshot).toMatchObject({ language: 'Go', releases: [], pullRequests: [], openPullRequests: 0 })
+  })
+
+  it('still fails when GitLab itself fails', async () => {
+    await expect(syncGitlabRepo(fakeClient({ 'projects/42/releases': 500 }), 'gitlab:group:9', 42, log)).rejects.toThrow()
+  })
+
   it('skips activity feeds for an archived project', async () => {
     const snapshot = await syncGitlabRepo(fakeClient({ 'projects/42/languages': 500 }, { ...PROJECT, archived: true }), 'gitlab:group:9', 42, log)
     expect(snapshot).toMatchObject({ archived: true, pipelines: [], language: null })
