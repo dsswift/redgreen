@@ -24,6 +24,35 @@ const NAMED: Readonly<Record<string, Language>> = {
   'Objective-C': 'Swift',
 }
 
+/** The language a source file is written in, by its extension. Files that are not code have none. */
+const EXTENSIONS: Readonly<Record<string, Language>> = {
+  cs: 'C#', razor: 'C#', cshtml: 'C#',
+  go: 'Go',
+  py: 'Python',
+  ts: 'TypeScript', tsx: 'TypeScript', mts: 'TypeScript', cts: 'TypeScript',
+  js: 'JavaScript', jsx: 'JavaScript', mjs: 'JavaScript', cjs: 'JavaScript', vue: 'JavaScript', svelte: 'JavaScript',
+  tf: 'Terraform',
+  bicep: 'Bicep',
+  ps1: 'PowerShell', psm1: 'PowerShell',
+  sh: 'Shell', bash: 'Shell',
+  swift: 'Swift',
+  rs: 'Rust',
+  c: 'C++', cc: 'C++', cpp: 'C++', h: 'C++', hpp: 'C++',
+  lua: 'Lua',
+  gd: 'GDScript',
+  html: 'HTML',
+  css: 'CSS', scss: 'CSS', sass: 'CSS', less: 'CSS',
+  sql: 'SQL',
+  java: 'Other', kt: 'Other', rb: 'Other', php: 'Other', fs: 'Other', vb: 'Other', scala: 'Other', dart: 'Other',
+}
+
+/** The language of one file, or null for a file that is not code. */
+export function languageOfFile(path: string): Language | null {
+  const name = path.slice(path.lastIndexOf('/') + 1)
+  const dot = name.lastIndexOf('.')
+  return dot > 0 ? (EXTENSIONS[name.slice(dot + 1).toLowerCase()] ?? null) : null
+}
+
 /** The name on the list for what a forge reported, `Other` when it is not on it, and null for no language. */
 export function listedLanguage(name: string | null | undefined): Language | null {
   if (!name) return null

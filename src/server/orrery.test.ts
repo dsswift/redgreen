@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { RepoSnapshot, Run } from '../shared/model.ts'
 import type { RepoHealth } from '../shared/rules.ts'
-import { DEPLOYMENT_BLUEPRINT, REPOSITORY_BLUEPRINT, toDeployments, toRepository } from './orrery.ts'
+import { DEPLOYMENT_BLUEPRINT, REPOSITORY_BLUEPRINT, SERVICE_BLUEPRINT, toDeployments, toRepository, toServices } from './orrery.ts'
 
 const run = (conclusion: Run['conclusion'], ref = 'main'): Run => ({ id: 'r', number: 1, title: 't', trigger: 'push', ref, sha: 's', status: 'completed', conclusion, createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z', url: 'u', actor: null })
 
@@ -70,5 +70,34 @@ describe('toDeployments', () => {
   it('has nothing to say for a forge that keeps no deployments', () => {
     expect(toDeployments({ ...repo, deployments: null })).toEqual([])
     expect(toDeployments(repo)).toEqual([])
+  })
+})
+
+describe('toServices', () => {
+  it('keys each service under its repository, wears its language, and points home', () => {
+    const out = toServices({
+      ...repo,
+      services: {
+        commit: 'abc',
+        rules: 1,
+        services: [
+          { id: '', path: '', name: 'Payments', type: 'backend', language: 'Go' },
+          { id: 'web/Checkout', path: 'web/Checkout', name: 'checkout', type: 'frontend', language: 'TypeScript' },
+          { id: 'deploy', path: 'deploy', name: 'Payments infrastructure', type: 'infrastructure', language: null },
+        ],
+      },
+    })
+    expect(out.map((s) => [s.key, s.icon])).toEqual([
+      ['github/example/payments', 'go'],
+      ['github/example/payments/web/checkout', 'typescript'],
+      ['github/example/payments/deploy', undefined],
+    ])
+    expect(out[1]).toMatchObject({ blueprint: 'service', title: 'checkout', fields: { path: 'web/Checkout', type: 'frontend', language: 'TypeScript' }, relations: { repository: 'github/example/payments' } })
+    for (const s of out) expect(Object.keys(s.fields).filter((f) => !(f in SERVICE_BLUEPRINT.fields))).toEqual([])
+  })
+
+  it('has nothing to say for a repo whose services were not read', () => {
+    expect(toServices({ ...repo, services: null })).toEqual([])
+    expect(toServices(repo)).toEqual([])
   })
 })

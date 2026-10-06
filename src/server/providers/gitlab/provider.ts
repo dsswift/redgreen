@@ -6,11 +6,13 @@ import type { Logger } from '../../log.ts'
 import type { SecretBox } from '../../secrets.ts'
 import type { AccountRow, DiscoveredRepo, Store } from '../../store.ts'
 import { isStatus } from '../errors.ts'
+import type { RepoFiles } from '../../services.ts'
 import type { DiscoveredAccount, Provider, ProviderStatus, WebhookOutcome } from '../provider.ts'
 import { RateLimits } from '../rate-limits.ts'
 import { GitlabClient, encodePath, type AuthHeaders } from './client.ts'
 import type { GlGroup, GlProject, GlUser } from './normalize.ts'
 import { authorizeUrl, exchangeCode, newState, refresh, type TokenSet } from './oauth.ts'
+import { gitlabFiles } from './files.ts'
 import { syncGitlabRepo } from './repo-sync.ts'
 
 const APP_SETTING = 'gitlab.app'
@@ -190,6 +192,10 @@ export class GitlabProvider implements Provider {
 
   async syncRepo(account: AccountRow, repoId: string, _fullName: string): Promise<RepoSnapshot> {
     return syncGitlabRepo(this.client(), account.id, numericId(repoId), this.log)
+  }
+
+  async files(_account: AccountRow, snapshot: RepoSnapshot): Promise<RepoFiles | null> {
+    return gitlabFiles(this.client(), numericId(snapshot.id), snapshot.defaultBranch)
   }
 
   // Webhooks --------------------------------------------------------------------

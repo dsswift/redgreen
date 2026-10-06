@@ -4,10 +4,12 @@ import type { Config } from '../../config.ts'
 import type { Logger } from '../../log.ts'
 import type { SecretBox } from '../../secrets.ts'
 import type { AccountRow, DiscoveredRepo, Store } from '../../store.ts'
+import type { RepoFiles } from '../../services.ts'
 import type { DiscoveredAccount, Provider, ProviderStatus, WebhookOutcome } from '../provider.ts'
 import { RateLimits } from '../rate-limits.ts'
 import { withConditionalRequests } from './client.ts'
 import type { GhRepo } from './normalize.ts'
+import { githubFiles } from './files.ts'
 import { syncGithubRepo } from './repo-sync.ts'
 
 const APP_SETTING = 'github.app'
@@ -225,6 +227,10 @@ export class GithubProvider implements Provider {
     const snapshot = await syncGithubRepo(await this.clientFor(account), account.id, fullName, this.log)
     if (snapshot.id !== repoId) throw new Error(`Repo id changed from ${repoId} to ${snapshot.id}`)
     return snapshot
+  }
+
+  async files(account: AccountRow, snapshot: RepoSnapshot): Promise<RepoFiles | null> {
+    return githubFiles(await this.clientFor(account), snapshot.fullName, snapshot.defaultBranch, this.log)
   }
 
   // Webhooks --------------------------------------------------------------------

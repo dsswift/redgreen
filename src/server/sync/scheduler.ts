@@ -1,10 +1,11 @@
 import type { SyncStatus } from '../../shared/api.ts'
-import type { ProviderKind } from '../../shared/model.ts'
+import type { ProviderKind, RepoServices, RepoSnapshot } from '../../shared/model.ts'
 import type { Config } from '../config.ts'
 import type { Estate } from '../estate.ts'
 import type { Events } from '../events.ts'
 import type { Logger } from '../log.ts'
 import type { Provider } from '../providers/provider.ts'
+import { READ_BUDGET, readServices } from '../services.ts'
 import type { AccountRow, Store } from '../store.ts'
 
 /** How long a webhook-triggered refresh waits for more events about the same repo. */
@@ -206,6 +207,7 @@ export class Scheduler {
     const started = Date.now()
     try {
       const snapshot = await provider.syncRepo(account, row.id, row.fullName)
+      snapshot.services = await this.services(provider, account, snapshot, row.snapshot?.services)
       this.store.saveSnapshot(snapshot)
       const level = this.estate.reconcileLevel({ ...row, snapshot, syncedAt: snapshot.syncedAt, syncError: null })
       this.log.info('repo synced', { repo: snapshot.fullName, reason: job.reason, health: level, ms: Date.now() - started })
@@ -216,6 +218,21 @@ export class Scheduler {
     } finally {
       this.inFlight.delete(job.repoId)
       this.events.emit({ type: 'repo', id: job.repoId })
+    }
+  }
+
+  /** The services in a repo. A failed read keeps the last answer, so nothing is dropped from the catalog for a hiccup. */
+  private async services(provider: Provider, account: AccountRow, snapshot: RepoSnapshot, previous: RepoServices | null | undefined): Promise<RepoServices | null> {
+    const repoName = snapshot.fullName.slice(snapshot.fullName.lastIndexOf('/') + 1)
+    try {
+      const { services, reused, read } = await readServices(await provider.files(account, snapshot), repoName, previous)
+      if (reused) this.log.debug('services unchanged; the default branch has not moved', { repo: snapshot.fullName, services: services.services.length })
+      else this.log.info('services read', { repo: snapshot.fullName, commit: services.commit, services: services.services.length, filesRead: read })
+      if (read > READ_BUDGET) this.log.warn('read budget spent; services found so far stand', { repo: snapshot.fullName, budget: READ_BUDGET })
+      return services
+    } catch (error) {
+      this.log.warn('services could not be read; the last answer stands', { repo: snapshot.fullName, error })
+      return previous ?? null
     }
   }
 

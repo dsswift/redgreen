@@ -1,11 +1,13 @@
 // Pushes every repository to an Orrery hub as a `repository` entity, so the
-// catalog there lists what this board watches, and every finished deployment
-// the forge recorded as a `deployment` entity. The blueprints travel with the
-// push and are offered to the hub first. Repositories go as one snapshot run
-// per account, and a single repo is patched as soon as it syncs. Deployments
-// only accumulate, so they go in an incremental run of their own.
+// catalog there lists what this board watches, every service found in one as
+// a `service` entity, and every finished deployment the forge recorded as a
+// `deployment` entity. The blueprints travel with the push and are offered to
+// the hub first. Repositories and services each go as one snapshot run per
+// account, and a single repo and its services are patched as soon as it
+// syncs. Deployments only accumulate, so they go in an incremental run of
+// their own.
 
-import { LANGUAGES, listedLanguage } from '../shared/languages.ts'
+import { LANGUAGES, listedLanguage, type Language } from '../shared/languages.ts'
 import type { RepoSnapshot } from '../shared/model.ts'
 import type { Level, RepoHealth } from '../shared/rules.ts'
 import type { Config } from './config.ts'
@@ -19,6 +21,15 @@ export interface RepositoryEntity {
   key: string
   title: string
   fields: Record<string, unknown>
+}
+
+export interface ServiceEntity {
+  blueprint: 'service'
+  key: string
+  title: string
+  icon?: string
+  fields: Record<string, unknown>
+  relations: { repository: string }
 }
 
 export interface DeploymentEntity {
@@ -101,6 +112,44 @@ const REPOSITORY_DEPLOYMENT_FIELDS = {
   },
 }
 
+/** What `toServices` writes. A hub that already has a service blueprint gains the fields and the relation it lacks, and keeps the rest of it as people made it. */
+export const SERVICE_BLUEPRINT = {
+  id: 'service',
+  title: 'Service',
+  group: 'Catalog',
+  description:
+    'One piece of software people run and answer for: an app, an API, a job, a command-line tool, a library others build on, or the infrastructure it stands on. The repo health board finds each one from the files that build it and pushes where it lives, what kind it is, and what it is written in. What people decide about it, such as how much it matters, its lifecycle, and its runbook, is theirs to add here.',
+  icon: 'service',
+  fields: {
+    path: { type: 'string', description: 'Where the service sits inside its repository, empty for one that is the whole repository.' },
+    type: { type: 'enum', values: ['backend', 'frontend', 'library', 'infrastructure', 'tool', 'docs', 'other'], description: 'What kind of thing it is, read from the files that build it.' },
+    language: { type: 'enum', values: [...LANGUAGES], sticky: true, description: 'What the service is written in, read from the files that build it. A repository that holds several services can hold several languages; this is the one for this service. A person who knows better changes it, and that change stays.' },
+  },
+  relations: {
+    repository: { target: 'repository', many: false, title: 'Homed in', inverseTitle: 'Services' },
+  },
+}
+
+/** The picture a service wears for the language it is written in. A language with none in the hub's set leaves the blueprint's. */
+const LANGUAGE_ICONS: Partial<Record<Language, string>> = {
+  'C#': 'csharp',
+  Go: 'go',
+  Python: 'python',
+  TypeScript: 'typescript',
+  JavaScript: 'javascript',
+  Terraform: 'terraform',
+  Bicep: 'azure',
+  PowerShell: 'powershell',
+  Shell: 'bash',
+  Swift: 'swift',
+  Rust: 'rust',
+  'C++': 'cpp',
+  Lua: 'lua',
+  HTML: 'html',
+  CSS: 'css',
+  SQL: 'database',
+}
+
 /** What `toDeployments` writes. A hub that already has a deployment blueprint from another pusher gains the fields and the relation it lacks. */
 export const DEPLOYMENT_BLUEPRINT = {
   id: 'deployment',
@@ -128,6 +177,22 @@ export const DEPLOYMENT_BLUEPRINT = {
 }
 
 const repositoryKey = (repo: Pick<RepoSnapshot, 'provider' | 'fullName'>) => `${repo.provider}/${repo.fullName}`.toLowerCase()
+
+/** Every service found in a repo, pointing at its repository. Empty when the services could not be read. Pure, so it is tested without a hub. */
+export function toServices(repo: RepoSnapshot): ServiceEntity[] {
+  const key = repositoryKey(repo)
+  return (repo.services?.services ?? []).map((s) => {
+    const icon = s.language ? LANGUAGE_ICONS[s.language] : undefined
+    return {
+      blueprint: 'service',
+      key: s.id ? `${key}/${s.id.toLowerCase()}` : key,
+      title: s.name,
+      ...(icon ? { icon } : {}),
+      fields: { path: s.path, type: s.type, language: s.language },
+      relations: { repository: key },
+    }
+  })
+}
 
 /** Every deployment of a repo that reached an end. One still running is left for the sweep after it finishes. Pure, so it is tested without a hub. */
 export function toDeployments(repo: RepoSnapshot): DeploymentEntity[] {
@@ -214,6 +279,8 @@ export class OrreryPusher {
   private offered = false
   /** False when the hub refused the deployment blueprint: the source is not registered for it. */
   private deployments = false
+  /** False when the hub refused the service blueprint: the source is not registered for it. */
+  private services = false
   private timer: NodeJS.Timeout | null = null
   private unsubscribe: (() => void) | null = null
 
@@ -266,13 +333,16 @@ export class OrreryPusher {
   private async offer(): Promise<boolean> {
     if (this.offered) return true
     try {
-      const res = (await this.call('PUT', '/ingest/blueprints', { blueprints: [REPOSITORY_BLUEPRINT, DEPLOYMENT_BLUEPRINT] })) as { created?: string[]; extended?: string[]; rejected?: { blueprint: string; reason: string }[] }
+      const res = (await this.call('PUT', '/ingest/blueprints', { blueprints: [REPOSITORY_BLUEPRINT, SERVICE_BLUEPRINT, DEPLOYMENT_BLUEPRINT] })) as { created?: string[]; extended?: string[]; rejected?: { blueprint: string; reason: string }[] }
       // Repositories are the point; a hub that will not take deployments still gets them.
       const refused = res.rejected?.find((r) => r.blueprint === 'repository')
       if (refused) {
         this.log.error('orrery refused the repository blueprint', { reason: refused.reason })
         return false
       }
+      const services = res.rejected?.find((r) => r.blueprint === 'service')
+      this.services = !services
+      if (services) this.log.warn('orrery refused the service blueprint; services are not pushed', { reason: services.reason })
       const deployments = res.rejected?.find((r) => r.blueprint === 'deployment')
       this.deployments = !deployments
       if (deployments) this.log.warn('orrery refused the deployment blueprint; deployments are not pushed', { reason: deployments.reason })
@@ -281,7 +351,7 @@ export class OrreryPusher {
         if (counted.rejected?.length) this.log.warn('orrery refused the deployment counts on repository; deployments are pushed without them', { reason: counted.rejected[0]?.reason })
       }
       this.offered = true
-      this.log.info('orrery blueprints offered', { created: res.created ?? [], extended: res.extended ?? [], deployments: this.deployments })
+      this.log.info('orrery blueprints offered', { created: res.created ?? [], extended: res.extended ?? [], services: this.services, deployments: this.deployments })
       return true
     } catch (error) {
       this.log.error('orrery blueprint offer failed', { error })
@@ -297,8 +367,11 @@ export class OrreryPusher {
     if (!(await this.offer())) return
     const entity = toRepository(row.snapshot, account, this.estate.healthOf(row), this.boardUrl(row.id))
     try {
-      await this.call('PATCH', `/ingest/entities/repository/${encodeURIComponent(entity.key)}`, { title: entity.title, fields: entity.fields, scope: `${account.provider}/${account.login}`.toLowerCase() })
-      this.log.debug('orrery repo pushed', { repo: row.fullName })
+      const scope = `${account.provider}/${account.login}`.toLowerCase()
+      await this.call('PATCH', `/ingest/entities/repository/${encodeURIComponent(entity.key)}`, { title: entity.title, fields: entity.fields, scope })
+      const services = this.services ? toServices(row.snapshot) : []
+      for (const s of services) await this.call('PATCH', `/ingest/entities/service/${encodeURIComponent(s.key)}`, { title: s.title, ...(s.icon ? { icon: s.icon } : {}), fields: s.fields, relations: s.relations, scope: `${scope}/services` })
+      this.log.debug('orrery repo pushed', { repo: row.fullName, services: services.length })
     } catch (error) {
       this.log.warn('orrery repo push failed', { repo: row.fullName, error })
     }
@@ -316,23 +389,44 @@ export class OrreryPusher {
       const mode = synced.length === mine.length ? 'snapshot' : 'incremental'
       const scope = `${account.provider}/${account.login}`.toLowerCase()
       try {
-        const run = (await this.call('POST', '/ingest/runs', { mode, scope })) as { id: string }
         const entities = synced.map((r) => toRepository(r.snapshot!, account, this.estate.healthOf(r), this.boardUrl(r.id)))
-        let rejected = 0
-        for (let i = 0; i < entities.length; i += 100) {
-          const res = (await this.call('PUT', `/ingest/runs/${encodeURIComponent(run.id)}/entities`, { entities: entities.slice(i, i + 100) })) as { rejected?: { key?: string; field?: string; reason: string }[] }
-          for (const r of res.rejected ?? []) {
-            rejected++
-            this.log.warn('orrery rejected a repository', { key: r.key, field: r.field, reason: r.reason })
-          }
-        }
-        await this.call('POST', `/ingest/runs/${encodeURIComponent(run.id)}/commit`)
+        const rejected = await this.run(mode, scope, entities, 'repository')
         this.log.info('orrery push done', { reason, account: account.login, mode, repositories: entities.length, unsynced: mine.length - synced.length, rejected })
+        await this.pushServices(account.login, scope, mode, synced.map((r) => r.snapshot!))
         await this.pushDeployments(account.login, scope, synced.flatMap((r) => toDeployments(r.snapshot!)))
       } catch (error) {
         this.log.error('orrery push failed', { reason, account: account.login, error })
       }
     }
+  }
+
+  /** One run of entities in batches, committed. Answers how many the hub rejected. */
+  private async run(mode: 'snapshot' | 'incremental', scope: string, entities: (RepositoryEntity | ServiceEntity | DeploymentEntity)[], kind: string): Promise<number> {
+    const run = (await this.call('POST', '/ingest/runs', { mode, scope })) as { id: string }
+    let rejected = 0
+    for (let i = 0; i < entities.length; i += 100) {
+      const res = (await this.call('PUT', `/ingest/runs/${encodeURIComponent(run.id)}/entities`, { entities: entities.slice(i, i + 100) })) as { rejected?: { key?: string; field?: string; reason: string }[] }
+      for (const r of res.rejected ?? []) {
+        rejected++
+        this.log.warn(`orrery rejected a ${kind}`, { key: r.key, field: r.field, reason: r.reason })
+      }
+    }
+    await this.call('POST', `/ingest/runs/${encodeURIComponent(run.id)}/commit`)
+    return rejected
+  }
+
+  /** A snapshot only when every repo's services were read, so a service is never dropped because its repo could not be. */
+  private async pushServices(account: string, scope: string, repoMode: 'snapshot' | 'incremental', snapshots: RepoSnapshot[]): Promise<void> {
+    if (!this.services) {
+      this.log.debug('no services pushed; the hub refused the blueprint', { account })
+      return
+    }
+    const unread = snapshots.filter((s) => !s.services).length
+    const mode = repoMode === 'snapshot' && unread === 0 ? 'snapshot' : 'incremental'
+    if (mode === 'incremental') this.log.info('services pushed without deleting; some repos are unread', { account, unread })
+    const entities = snapshots.flatMap(toServices)
+    const rejected = await this.run(mode, `${scope}/services`, entities, 'service')
+    this.log.info('orrery services pushed', { account, mode, services: entities.length, rejected })
   }
 
   /** Deployments never leave a forge's list in order, so the run is incremental: the hub keeps each one until it expires. */
@@ -341,16 +435,7 @@ export class OrreryPusher {
       this.log.debug('no deployments pushed', { account, accepted: this.deployments, found: entities.length })
       return
     }
-    const run = (await this.call('POST', '/ingest/runs', { mode: 'incremental', scope: `${scope}/deployments` })) as { id: string }
-    let rejected = 0
-    for (let i = 0; i < entities.length; i += 100) {
-      const res = (await this.call('PUT', `/ingest/runs/${encodeURIComponent(run.id)}/entities`, { entities: entities.slice(i, i + 100) })) as { rejected?: { key?: string; field?: string; reason: string }[] }
-      for (const r of res.rejected ?? []) {
-        rejected++
-        this.log.warn('orrery rejected a deployment', { key: r.key, field: r.field, reason: r.reason })
-      }
-    }
-    await this.call('POST', `/ingest/runs/${encodeURIComponent(run.id)}/commit`)
+    const rejected = await this.run('incremental', `${scope}/deployments`, entities, 'deployment')
     this.log.info('orrery deployments pushed', { account, deployments: entities.length, rejected })
   }
 }

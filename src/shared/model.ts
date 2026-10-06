@@ -1,6 +1,8 @@
 // The provider-neutral estate model. Every provider normalizes into these
 // shapes; nothing downstream of a provider knows which forge a repo lives on.
 
+import type { Language } from './languages.ts'
+
 export const PROVIDERS = ['github', 'gitlab', 'azuredevops'] as const
 export type ProviderKind = (typeof PROVIDERS)[number]
 
@@ -130,6 +132,30 @@ export interface RepoFacts {
   lastCommitAt: string | null
 }
 
+/** What kind of thing a service is. People may also call one `docs` or `other` in a catalog; detection never does. */
+export type ServiceType = 'backend' | 'frontend' | 'library' | 'infrastructure' | 'tool'
+
+/** One piece of software a repository builds and something runs on its own, found from the files that build it. */
+export interface DetectedService {
+  /** Unique within the repository and stable while the code stays put: the folder, or `''` for the root. */
+  id: string
+  /** The folder the service is built from, `''` for the root. */
+  path: string
+  /** The name its own build file gives it, else its folder's or repository's name. */
+  name: string
+  type: ServiceType
+  language: Language | null
+}
+
+/** The services found at one commit of the default branch. */
+export interface RepoServices {
+  /** The commit they were read from. Null for a repository with no commits. */
+  commit: string | null
+  /** The version of the rules that found them. A repository read under older rules is read again. */
+  rules: number
+  services: DetectedService[]
+}
+
 export interface RepoSnapshot {
   id: string
   provider: ProviderKind
@@ -159,5 +185,7 @@ export interface RepoSnapshot {
   facts?: RepoFacts | null
   /** Recent deployments, newest first. Null when the forge keeps none for the repo or will not show them; absent on older snapshots and for forges not read yet. */
   deployments?: Deployment[] | null
+  /** The services the repository holds. Null when they could not be read; absent on older snapshots. */
+  services?: RepoServices | null
   syncedAt: string
 }

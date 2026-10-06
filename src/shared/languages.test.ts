@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { LANGUAGES, listedLanguage, mainLanguage } from './languages.ts'
+import { LANGUAGES, languageOfFile, listedLanguage, mainLanguage } from './languages.ts'
 
 describe('a repository\'s main language', () => {
   it('is always one of the list', () => {
@@ -22,5 +22,17 @@ describe('a repository\'s main language', () => {
     expect(mainLanguage({ Dockerfile: 60, Makefile: 40 })).toBe('Other')
     expect(mainLanguage({ Python: 50, Go: 50 })).toBe('Go')
     expect(mainLanguage({})).toBeNull()
+  })
+})
+
+describe('the language of one file', () => {
+  it('comes from its extension, and a file that is not code has none', () => {
+    expect(languageOfFile('src/Api/Run.cs')).toBe('C#')
+    expect(languageOfFile('web/app/page.TSX')).toBe('TypeScript')
+    expect(languageOfFile('infra/main.tf')).toBe('Terraform')
+    expect(languageOfFile('App.java')).toBe('Other')
+    expect(languageOfFile('README.md')).toBeNull()
+    expect(languageOfFile('Dockerfile')).toBeNull()
+    expect(languageOfFile('.gitignore')).toBeNull()
   })
 })

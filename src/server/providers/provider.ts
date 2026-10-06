@@ -1,5 +1,6 @@
 import type { ProviderStatus } from '../../shared/api.ts'
 import type { ProviderKind, RepoSnapshot } from '../../shared/model.ts'
+import type { RepoFiles } from '../services.ts'
 import type { AccountRow, Connection, DiscoveredRepo } from '../store.ts'
 
 export type { ProviderStatus, RateLimit } from '../../shared/api.ts'
@@ -33,6 +34,8 @@ export interface Provider {
   discoverAccounts(): Promise<DiscoveredAccount[]>
   discoverRepos(account: AccountRow): Promise<DiscoveredRepo[]>
   syncRepo(account: AccountRow, repoId: string, fullName: string): Promise<RepoSnapshot>
+  /** The repository's files at the head of its default branch, or null when it has no commits there. */
+  files(account: AccountRow, snapshot: RepoSnapshot): Promise<RepoFiles | null>
   /** Verifies and interprets a webhook delivery. Absent for providers that only poll. */
   handleWebhook?(headers: Headers, body: string): Promise<WebhookOutcome>
 }

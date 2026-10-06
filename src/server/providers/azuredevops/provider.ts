@@ -5,9 +5,11 @@ import type { Logger } from '../../log.ts'
 import type { SecretBox } from '../../secrets.ts'
 import type { AccountRow, DiscoveredRepo, Store } from '../../store.ts'
 import { isStatus } from '../errors.ts'
+import type { RepoFiles } from '../../services.ts'
 import type { DiscoveredAccount, Provider, ProviderStatus } from '../provider.ts'
 import { RateLimits } from '../rate-limits.ts'
 import { AzureDevopsClient } from './client.ts'
+import { azureDevopsFiles } from './files.ts'
 import { requestToken, type AccessToken, type ServicePrincipal } from './entra.ts'
 import { topLanguages, type AdoLanguageMetrics, type AdoRepo } from './normalize.ts'
 import { AZURE_DEVOPS_URL, syncAzureDevopsRepo } from './repo-sync.ts'
@@ -150,6 +152,10 @@ export class AzureDevopsProvider implements Provider {
   async syncRepo(account: AccountRow, repoId: string, _fullName: string): Promise<RepoSnapshot> {
     const org = account.login
     return syncAzureDevopsRepo(this.client(), account.id, org, repoId.slice(repoId.lastIndexOf(':') + 1), (projectId, id) => this.language(org, projectId, id), this.log)
+  }
+
+  async files(account: AccountRow, snapshot: RepoSnapshot): Promise<RepoFiles | null> {
+    return azureDevopsFiles(this.client(), account.login, snapshot.id.slice(snapshot.id.lastIndexOf(':') + 1), snapshot.defaultBranch)
   }
 
   // Clients ---------------------------------------------------------------------
