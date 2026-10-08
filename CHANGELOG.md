@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.2.4](https://github.com/dsswift/redgreen/compare/v0.2.3...v0.2.4) (2026-10-08)
+
+
+### Bug Fixes
+
+* sign in again when the sign-in has ended ([a484f06](https://github.com/dsswift/redgreen/commit/a484f068265cf6549f271b7ce440c44bdb0e0b71))
+
 ### [0.2.3](https://github.com/dsswift/redgreen/compare/v0.2.2...v0.2.3) (2026-10-06)
 
 
