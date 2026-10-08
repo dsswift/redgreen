@@ -3,9 +3,15 @@ import { useEffect } from 'react'
 import type { EstateResponse, RepoDetailResponse, ServerEvent, SettingsResponse } from '../shared/api.ts'
 import type { Account } from '../shared/model.ts'
 import type { RepoSettings, RuleSeverities } from '../shared/rules.ts'
+import { SIGNED_OUT, signInAgain, signedOut } from './session.ts'
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, { ...init, headers: { 'content-type': 'application/json', ...init?.headers } })
+  const response = await fetch(path, { ...init, redirect: 'manual', headers: { 'content-type': 'application/json', ...init?.headers } })
+  if (signedOut(response)) {
+    // The page is about to be replaced, so this never settles: no error is shown on the way out.
+    if (signInAgain({ storage: sessionStorage, reload: () => location.reload(), now: Date.now() })) return new Promise<never>(() => {})
+    throw new Error(SIGNED_OUT)
+  }
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { error?: string } | null
     throw new Error(body?.error ?? `${response.status} ${response.statusText}`)
@@ -119,6 +125,9 @@ export function useLiveUpdates(client: QueryClient): void {
     source.addEventListener('repo', handle)
     source.addEventListener('estate', handle)
     source.addEventListener('sync', handle)
+    // A stream that drops says nothing of why. Asking for the estate finds an ended sign-in, on a page nobody is touching too.
+    const ask = debounce(() => void client.refetchQueries({ queryKey: keys.estate }), 2_000)
+    source.addEventListener('error', ask)
     return () => source.close()
   }, [client])
 }

@@ -32,7 +32,10 @@ Estate health board. Read `README.md` first.
 - Health is computed at read time from stored snapshots in
   `server/health/evaluate.ts`. Changing a rule never needs a resync.
 - `src/web` is a Vite React app served by the server from `dist/web` in
-  production and proxied from the Vite dev server locally.
+  production and proxied from the Vite dev server locally. Every request goes
+  through `call` in `api.ts`. When an answer says the sign-in has ended,
+  `session.ts` reloads the page so the gate in front signs the person in
+  again; a view never handles that itself.
 
 ## Rules of the house
 

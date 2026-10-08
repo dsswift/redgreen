@@ -117,6 +117,11 @@ There is no login of its own. Put it behind your own gate (oauth2-proxy, a VPN,
 a LAN) and leave `POST /api/webhooks/github`, `POST /api/webhooks/gitlab`, and
 `GET /healthz` open.
 
+When a sign-in ends while a page is open, the page reloads itself and the gate
+signs the person in again, back where they were. The web app reads that from a
+redirect or a `401` on any `/api` request. A gate that renews its session
+quietly keeps an open tab from getting that far.
+
 ## Deploy
 
 ```bash
