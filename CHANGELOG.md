@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.2.5](https://github.com/dsswift/redgreen/compare/v0.2.4...v0.2.5) (2026-10-12)
+
+
+### Features
+
+* stamp services with their folder's last change ([9a1abf8](https://github.com/dsswift/redgreen/commit/9a1abf801d48e1832b35f6f96364b1b3a571a4e9))
+
 ### [0.2.4](https://github.com/dsswift/redgreen/compare/v0.2.3...v0.2.4) (2026-10-08)
 
 
