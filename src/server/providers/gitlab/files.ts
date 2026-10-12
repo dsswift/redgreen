@@ -23,5 +23,9 @@ export async function gitlabFiles(client: GitlabClient, projectId: number, branc
         throw error
       }
     },
+    lastChange: async (path) => {
+      const [last] = await client.get<{ committed_date: string }[]>(`projects/${projectId}/repository/commits`, { ref_name: commit, per_page: 1, ...(path ? { path } : {}) })
+      return last?.committed_date ?? null
+    },
   }
 }

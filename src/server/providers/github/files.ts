@@ -29,5 +29,9 @@ export async function githubFiles(kit: Octokit, fullName: string, branch: string
       const { data } = await kit.request('GET /repos/{owner}/{repo}/git/blobs/{file_sha}', { owner, repo, file_sha: sha })
       return data.encoding === 'base64' ? Buffer.from(data.content, 'base64').toString('utf8') : data.content
     },
+    lastChange: async (path) => {
+      const { data } = await kit.request('GET /repos/{owner}/{repo}/commits', { owner, repo, sha: commit, per_page: 1, ...(path ? { path } : {}) })
+      return data[0]?.commit.committer?.date ?? data[0]?.commit.author?.date ?? null
+    },
   }
 }
