@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.2.6](https://github.com/dsswift/redgreen/compare/v0.2.5...v0.2.6) (2026-10-14)
+
+
+### Features
+
+* publish the image to the github registry ([dfe5a82](https://github.com/dsswift/redgreen/commit/dfe5a824067d0f9d279c27faaf066d990a62fcaa))
+* stamp services with who last changed them ([bb87890](https://github.com/dsswift/redgreen/commit/bb878904a1ab2b3f0817d3017afab803bc10c17b))
+
 ### [0.2.5](https://github.com/dsswift/redgreen/compare/v0.2.4...v0.2.5) (2026-10-12)
 
 
