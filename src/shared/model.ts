@@ -147,6 +147,8 @@ export interface DetectedService {
   language: Language | null
   /** When the newest commit on the default branch touched the service's folder. Null when the forge could not say. */
   changedAt?: string | null
+  /** Who made that commit, as the forge names them. Null when the forge could not say. */
+  changedBy?: string | null
 }
 
 /** The services found at one commit of the default branch. */

@@ -123,6 +123,7 @@ export const SERVICE_BLUEPRINT = {
   fields: {
     path: { type: 'string', description: 'Where the service sits inside its repository, empty for one that is the whole repository.' },
     last_changed_at: { type: 'datetime', title: 'Last changed', description: "When the newest commit on the default branch touched the service's folder. A repository that holds several services moves each one only when its own folder changes." },
+    last_changed_by: { type: 'string', title: 'Last changed by', description: "Who made the newest commit on the default branch that touched the service's folder, as the forge names them." },
     type: { type: 'enum', values: ['backend', 'frontend', 'library', 'infrastructure', 'tool', 'docs', 'other'], description: 'What kind of thing it is, read from the files that build it.' },
     language: { type: 'enum', values: [...LANGUAGES], sticky: true, description: 'What the service is written in, read from the files that build it. A repository that holds several services can hold several languages; this is the one for this service. A person who knows better changes it, and that change stays.' },
   },
@@ -189,7 +190,7 @@ export function toServices(repo: RepoSnapshot): ServiceEntity[] {
       key: s.id ? `${key}/${s.id.toLowerCase()}` : key,
       title: s.name,
       ...(icon ? { icon } : {}),
-      fields: { path: s.path, type: s.type, language: s.language, last_changed_at: s.changedAt ?? null },
+      fields: { path: s.path, type: s.type, language: s.language, last_changed_at: s.changedAt ?? null, last_changed_by: s.changedBy ?? null },
       relations: { repository: key },
     }
   })

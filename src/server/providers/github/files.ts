@@ -31,7 +31,8 @@ export async function githubFiles(kit: Octokit, fullName: string, branch: string
     },
     lastChange: async (path) => {
       const { data } = await kit.request('GET /repos/{owner}/{repo}/commits', { owner, repo, sha: commit, per_page: 1, ...(path ? { path } : {}) })
-      return data[0]?.commit.committer?.date ?? data[0]?.commit.author?.date ?? null
+      const last = data[0]
+      return last ? { at: last.commit.committer?.date ?? last.commit.author?.date ?? null, by: last.author?.login ?? last.commit.author?.name ?? null } : null
     },
   }
 }

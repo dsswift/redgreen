@@ -95,12 +95,12 @@ describe('reading a repository', () => {
       reads.push(p)
       return 'package main\nfunc main() {}\n'
     },
-    lastChange: async (p) => (p === '' ? `${commit}-at` : null),
+    lastChange: async (p) => (p === '' ? { at: `${commit}-at`, by: `${commit}-by` } : null),
   })
 
-  it('stamps each service with when its own folder last changed', async () => {
+  it('stamps each service with when and by whom its own folder last changed', async () => {
     const { services } = await readServices(files('a'), 'tool', null)
-    expect(services.services[0]?.changedAt).toBe('a-at')
+    expect(services.services[0]).toMatchObject({ changedAt: 'a-at', changedBy: 'a-by' })
   })
 
   it('reads again only when the branch moved or the rules changed', async () => {

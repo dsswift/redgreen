@@ -10,7 +10,13 @@ import { languageOfFile, mainLanguage, type Language } from '../shared/languages
 import type { DetectedService, RepoServices, ServiceType } from '../shared/model.ts'
 
 /** Bump on any change to the rules below, so every repository is read again instead of trusting its last answer. */
-export const SERVICE_RULES = 2
+export const SERVICE_RULES = 3
+
+/** The newest commit that touched a folder. Either part is null when the forge left it out. */
+export interface LastChange {
+  at: string | null
+  by: string | null
+}
 
 /** A repository's files at the head of its default branch. */
 export interface RepoFiles {
@@ -19,8 +25,8 @@ export interface RepoFiles {
   list(): Promise<string[]>
   /** One file's text, or null when it cannot be read. */
   read(path: string): Promise<string | null>
-  /** When the newest commit at or before this one touched `path`, a folder or `''` for the root. Null when the forge cannot say. */
-  lastChange(path: string): Promise<string | null>
+  /** When the newest commit at or before this one touched `path`, a folder or `''` for the root, and who made it. Null when the forge cannot say. */
+  lastChange(path: string): Promise<LastChange | null>
 }
 
 /** Files read per repository at most. A monorepo past this is read in part; the services found so far stand. */
@@ -302,7 +308,12 @@ export async function readServices(files: RepoFiles | null, repoName: string, pr
   if (previous && previous.commit === files.commit && previous.rules === SERVICE_RULES) return { services: previous, reused: true, read: 0 }
   const reader = budgeted((p) => files.read(p))
   const found = await detectServices(await files.list(), reader.read, repoName)
-  const services = await Promise.all(found.map(async (s) => ({ ...s, changedAt: await files.lastChange(s.path) })))
+  const services = await Promise.all(
+    found.map(async (s) => {
+      const last = await files.lastChange(s.path)
+      return { ...s, changedAt: last?.at ?? null, changedBy: last?.by ?? null }
+    }),
+  )
   return { services: { commit: files.commit, rules: SERVICE_RULES, services }, reused: false, read: reader.spent() }
 }
 

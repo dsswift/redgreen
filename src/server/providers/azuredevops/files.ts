@@ -27,8 +27,9 @@ export async function azureDevopsFiles(client: AzureDevopsClient, org: string, r
       }
     },
     lastChange: async (path) => {
-      const found = await client.get<{ value: { committer?: { date?: string } }[] }>(`${git}/commits`, { 'searchCriteria.itemVersion.version': commit, 'searchCriteria.itemVersion.versionType': 'commit', 'searchCriteria.itemPath': `/${path}`, 'searchCriteria.$top': 1 })
-      return found.value[0]?.committer?.date ?? null
+      const found = await client.get<{ value: { committer?: { date?: string }; author?: { name?: string } }[] }>(`${git}/commits`, { 'searchCriteria.itemVersion.version': commit, 'searchCriteria.itemVersion.versionType': 'commit', 'searchCriteria.itemPath': `/${path}`, 'searchCriteria.$top': 1 })
+      const last = found.value[0]
+      return last ? { at: last.committer?.date ?? null, by: last.author?.name ?? null } : null
     },
   }
 }
