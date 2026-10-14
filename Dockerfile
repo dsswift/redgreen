@@ -18,7 +18,9 @@ COPY --from=build /app/dist ./dist
 COPY package.json ./
 COPY src/server ./src/server
 COPY src/shared ./src/shared
-RUN mkdir -p /data && chown node:node /data
+# The tests are not part of the image.
+RUN find src -name '*.test.ts' -delete \
+ && mkdir -p /data && chown node:node /data
 USER node
 VOLUME /data
 EXPOSE 8080
