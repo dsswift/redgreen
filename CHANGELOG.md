@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.2.7](https://github.com/dsswift/redgreen/compare/v0.2.6...v0.2.7) (2026-10-16)
+
+
+### Features
+
+* detect readme, dockerfile, tests per service ([b1cfa92](https://github.com/dsswift/redgreen/commit/b1cfa92c8ea8ff10c75443489b9106e604e028d4))
+* read gitlab repository facts ([8be59ab](https://github.com/dsswift/redgreen/commit/8be59ab2c4ce587010871e064dc76119c7cbd6ca))
+
 ### [0.2.6](https://github.com/dsswift/redgreen/compare/v0.2.5...v0.2.6) (2026-10-14)
 
 
