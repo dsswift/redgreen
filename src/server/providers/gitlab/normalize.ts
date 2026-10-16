@@ -2,7 +2,7 @@
 // mapping onto the estate model. Only the fields used are declared.
 
 import { mainLanguage } from '../../../shared/languages.ts'
-import type { AlertCounts, ChecksState, Deployment, Pipeline, PipelineState, Run, RunConclusion, RunStatus, RunTrigger, Schedule } from '../../../shared/model.ts'
+import type { AlertCounts, ChecksState, Deployment, Pipeline, PipelineState, RepoFacts, Run, RunConclusion, RunStatus, RunTrigger, Schedule } from '../../../shared/model.ts'
 import { RAILS_TIME_ZONES } from './timezones.ts'
 
 export interface GlNamespace {
@@ -52,6 +52,28 @@ export interface GlProject {
   builds_access_level?: 'disabled' | 'private' | 'enabled'
   ci_config_path?: string | null
   namespace: GlNamespace
+  /** The project's topics. Older GitLab versions call them `tag_list`. */
+  topics?: string[]
+  tag_list?: string[]
+}
+
+/** A branch, with the commit at its head. */
+export interface GlBranch {
+  name: string
+  protected: boolean
+  commit: { id: string; author_name: string | null; committer_name: string | null; committed_date: string | null; authored_date: string | null }
+}
+
+/** The rules on a protected branch. `code_owner_approval_required` is a paid-tier setting and absent on the free tier. */
+export interface GlProtectedBranch {
+  name: string
+  code_owner_approval_required?: boolean | null
+}
+
+/** A merge request approval rule. A paid-tier feature: the free tier answers 404. */
+export interface GlApprovalRule {
+  approvals_required: number
+  rule_type: string
 }
 
 export interface GlPipeline {
@@ -268,4 +290,25 @@ export function securityCounts(security: GlSecurity | null, projectUrl: string):
 /** The repository's main language from the shares GitLab reports, or null for an empty one. */
 export function topLanguage(languages: Record<string, number>): string | null {
   return mainLanguage(languages)
+}
+
+/**
+ * Branch rules, the last commit, and which well-known files exist, from what a project answered. A null input is
+ * something it would not answer; the facts it would have given stay null rather than reading as no.
+ */
+export function toFacts(project: GlProject, branch: GlBranch | null, protection: GlProtectedBranch | null, approvals: GlApprovalRule[] | null, root: string[] | null): RepoFacts {
+  const names = root?.map((n) => n.toLowerCase()) ?? null
+  const reviewRules = approvals?.filter((r) => r.approvals_required > 0) ?? null
+  return {
+    topics: project.topics ?? project.tag_list ?? [],
+    branchProtected: branch ? branch.protected : null,
+    requiresReview: reviewRules ? reviewRules.length > 0 : null,
+    requiredApprovals: reviewRules ? Math.max(0, ...reviewRules.map((r) => r.approvals_required)) : null,
+    requiresCodeOwnerReview: typeof protection?.code_owner_approval_required === 'boolean' ? protection.code_owner_approval_required : null,
+    hasCodeowners: names ? names.includes('codeowners') : null,
+    hasReadme: names ? names.some((n) => n.startsWith('readme')) : null,
+    hasDockerfile: names ? names.some((n) => n === 'dockerfile' || n.endsWith('.dockerfile')) : null,
+    lastCommitter: branch?.commit.author_name ?? branch?.commit.committer_name ?? null,
+    lastCommitAt: branch?.commit.committed_date ?? branch?.commit.authored_date ?? null,
+  }
 }

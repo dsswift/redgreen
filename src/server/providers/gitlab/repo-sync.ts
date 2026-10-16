@@ -8,12 +8,16 @@ import {
   toDeployment,
   toMainPipeline,
   toRun,
+  toFacts,
   toSchedulePipeline,
   topLanguage,
+  type GlApprovalRule,
+  type GlBranch,
   type GlDeployment,
   type GlMergeRequest,
   type GlPipeline,
   type GlProject,
+  type GlProtectedBranch,
   type GlRelease,
   type GlSchedule,
   type GlSecurity,
@@ -67,13 +71,14 @@ export async function syncGitlabRepo(client: GitlabClient, accountId: string, pr
     return base
   }
 
-  const [language, tags, releases, mergeRequests, security, deployments] = await Promise.all([
+  const [language, tags, releases, mergeRequests, security, deployments, facts] = await Promise.all([
     fetchLanguage(client, project.id),
     fetchTags(client, project.id),
     featureOff(() => fetchReleases(client, project.id), [], 'releases', fullName, log),
     featureOff(() => fetchMergeRequests(client, project.id), [], 'merge requests', fullName, log),
     fetchSecurity(client, fullName, log),
     fetchDeployments(client, project, log),
+    fetchFacts(client, project, log),
   ])
   const pipelines = await fetchPipelines(client, project, tags, log)
   const pullRequests = await withChecks(client, project.id, mergeRequests)
@@ -87,7 +92,33 @@ export async function syncGitlabRepo(client: GitlabClient, accountId: string, pr
     pullRequests,
     security: securityCounts(security, project.web_url),
     deployments,
+    facts,
   }
+}
+
+/**
+ * Branch rules, the last commit on the default branch, and which well-known files sit at the root. Each part a
+ * project will not answer reads as unknown: approval rules are a paid-tier feature, so a free-tier GitLab answers
+ * 404 and review rules stay null rather than reading as none required.
+ */
+async function fetchFacts(client: GitlabClient, project: GlProject, log: Logger) {
+  const branchName = project.default_branch
+  const tolerate = async <T>(what: string, read: () => Promise<T>): Promise<T | null> => {
+    try {
+      return await read()
+    } catch (error) {
+      if (!isStatus(error, 403, 404)) throw error
+      log.debug('repo fact unavailable', { repo: project.path_with_namespace, what, status: Number((error as { status: number }).status) })
+      return null
+    }
+  }
+  const [branch, protection, approvals, root] = await Promise.all([
+    branchName ? tolerate('branch', () => client.get<GlBranch>(`projects/${project.id}/repository/branches/${encodeURIComponent(branchName)}`)) : null,
+    branchName ? tolerate('protection', () => client.get<GlProtectedBranch>(`projects/${project.id}/protected_branches/${encodeURIComponent(branchName)}`)) : null,
+    tolerate('approval rules', () => client.get<GlApprovalRule[]>(`projects/${project.id}/approval_rules`)),
+    branchName ? tolerate('root', () => client.get<{ name: string; type: string }[]>(`projects/${project.id}/repository/tree`, { ref: branchName, per_page: 100 })) : null,
+  ])
+  return toFacts(project, branch, protection, approvals, root?.map((i) => i.name) ?? null)
 }
 
 /**

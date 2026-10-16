@@ -46,7 +46,7 @@ const SCHEDULE = {
 }
 
 /** Answers the routes a project sync reads. Paths are relative to /api/v4 with the query string dropped. */
-function fakeClient(over: Record<string, unknown> = {}, project = PROJECT): GitlabClient {
+function fakeClient(over: Record<string, unknown> = {}, project: typeof PROJECT & { topics?: string[] } = PROJECT): GitlabClient {
   const routes: Record<string, unknown> = {
     'projects/42': project,
     'projects/42/languages': { Go: 80.5, Shell: 19.5 },
@@ -65,6 +65,10 @@ function fakeClient(over: Record<string, unknown> = {}, project = PROJECT): Gitl
       { id: 8, ref: 'main', sha: 'abb', status: 'running', created_at: '2026-09-30T00:00:00Z', updated_at: '2026-09-30T00:01:00Z', environment: { name: 'production' }, user: null, deployable: null },
     ],
     'projects/42/pipeline_schedules/5/pipelines': [pipeline({ id: 2, source: 'schedule', created_at: '2026-09-30T02:00:00Z' })],
+    'projects/42/repository/branches/main': { name: 'main', protected: true, commit: { id: 'abc', author_name: 'A Developer', committer_name: 'GitLab', committed_date: '2026-09-30T02:30:00Z', authored_date: '2026-09-30T02:20:00Z' } },
+    'projects/42/protected_branches/main': { name: 'main' },
+    'projects/42/approval_rules': 404,
+    'projects/42/repository/tree': [{ name: 'README.md', type: 'blob' }, { name: 'Dockerfile', type: 'blob' }, { name: 'src', type: 'tree' }],
     ...over,
   }
   const fail = (status: number, path: string) => Object.assign(new Error(`HTTP ${status} ${path}`), { status })
@@ -115,6 +119,37 @@ describe('syncGitlabRepo', () => {
       { id: '8', environment: 'production', status: 'running', ref: 'main', sha: 'abb', createdAt: '2026-09-30T00:00:00Z', finishedAt: null, url: null, actor: null },
     ])
     expect((await syncGitlabRepo(fakeClient({ 'projects/42/deployments': 403 }), 'gitlab:9', 42, log)).deployments).toBeNull()
+  })
+
+  it('reads the last commit, branch protection, and root files, and leaves review rules unknown where GitLab will not say', async () => {
+    const snapshot = await syncGitlabRepo(fakeClient({}, { ...PROJECT, topics: ['platform'] }), 'gitlab:group:9', 42, log)
+    expect(snapshot.facts).toEqual({
+      topics: ['platform'],
+      branchProtected: true,
+      requiresReview: null,
+      requiredApprovals: null,
+      requiresCodeOwnerReview: null,
+      hasCodeowners: false,
+      hasReadme: true,
+      hasDockerfile: true,
+      lastCommitter: 'A Developer',
+      lastCommitAt: '2026-09-30T02:30:00Z',
+    })
+  })
+
+  it('reads review rules and code owner approval where the tier has them', async () => {
+    const snapshot = await syncGitlabRepo(
+      fakeClient({ 'projects/42/approval_rules': [{ approvals_required: 0, rule_type: 'any_approver' }, { approvals_required: 2, rule_type: 'regular' }], 'projects/42/protected_branches/main': { name: 'main', code_owner_approval_required: true } }),
+      'gitlab:group:9',
+      42,
+      log,
+    )
+    expect(snapshot.facts).toMatchObject({ requiresReview: true, requiredApprovals: 2, requiresCodeOwnerReview: true })
+  })
+
+  it('leaves the facts unknown for a project with no commits on its default branch', async () => {
+    const snapshot = await syncGitlabRepo(fakeClient({ 'projects/42/repository/branches/main': 404, 'projects/42/protected_branches/main': 404, 'projects/42/repository/tree': 404 }), 'gitlab:group:9', 42, log)
+    expect(snapshot.facts).toMatchObject({ branchProtected: null, lastCommitter: null, lastCommitAt: null, hasReadme: null })
   })
 
   it('marks every pipeline disabled when CI is switched off for the project', async () => {
