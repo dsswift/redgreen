@@ -64,6 +64,9 @@ Estate health board. Read `README.md` first.
   `listedLanguage`. Add a language to the list there, and to `NAMED` when a
   forge calls it something else.
 - A service is pushed with the facts the files hold: its folder, its kind,
+  whether it has its own README, Dockerfile, and tests (`serviceFiles` in
+  `server/services.ts` is the only place that decides which service a file
+  belongs to),
   its language, and its icon. What people decide about it, such as its tier,
   lifecycle, description, or runbook, is never pushed; a pushed value would
   fight their edits.

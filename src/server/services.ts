@@ -7,10 +7,10 @@
 // commit always gives the same services.
 
 import { languageOfFile, mainLanguage, type Language } from '../shared/languages.ts'
-import type { DetectedService, RepoServices, ServiceType } from '../shared/model.ts'
+import type { DetectedService, RepoServices, ServiceFiles, ServiceType } from '../shared/model.ts'
 
 /** Bump on any change to the rules below, so every repository is read again instead of trusting its last answer. */
-export const SERVICE_RULES = 3
+export const SERVICE_RULES = 4
 
 /** The newest commit that touched a folder. Either part is null when the forge left it out. */
 export interface LastChange {
@@ -93,8 +93,14 @@ function languageUnder(files: string[], dir: string): Language | null {
 
 type Read = (path: string) => Promise<string | null>
 
-/** Every service in one repository's files. `repoName` names a service that sits at the root and names nothing itself. */
+/** Every service in one repository's files, each with what sits beside it. `repoName` names a service that sits at the root and names nothing itself. */
 export async function detectServices(paths: string[], read: Read, repoName: string): Promise<DetectedService[]> {
+  const services = await findServices(paths, read, repoName)
+  const files = await serviceFiles(paths, services, read)
+  return services.map((s, i) => ({ ...s, files: files[i]! }))
+}
+
+async function findServices(paths: string[], read: Read, repoName: string): Promise<DetectedService[]> {
   const files = paths.filter((p) => !skipped(p)).sort()
   const named = (dir: string) => (dir ? baseOf(dir) : repoName)
   const found: Found[] = []
@@ -246,6 +252,92 @@ export async function detectServices(paths: string[], read: Read, repoName: stri
   if (code.length > 0 && prose <= code.length * 3) return [{ id: '', path: '', name: repoName, type: 'tool', language: languageUnder(code, '') }]
   return []
 }
+
+/** Folders a repository holds other people's code or build output in. Nothing in them is the repository's own. */
+const FOREIGN = new Set(['node_modules', 'vendor', 'third_party', 'bower_components', 'dist', 'build', 'bin', 'obj', 'out', 'target', '.git', '.terraform'])
+/** A folder of tests, or a test project named for what it tests: `tests`, `__tests__`, `e2e`, `Tests.Orders.Api`, `Orders.Api.UnitTests`. */
+const TEST_DIR = /^(tests?|__tests__|e2e|specs?|(unit|integration|functional|acceptance)[.\-_]?tests?)$|^tests?[.\-_]|[.\-_](unit|integration|functional|acceptance|e2e)?tests?$/i
+/** A test file by its own name, in the conventions of each language. */
+const TEST_FILE = /(_test\.go|\.(test|spec)\.[cm]?[jt]sx?|(^|\/)test_[^/]*\.py|_test\.py|Tests?\.(cs|swift))$/
+const README = /^readme(\.|$)/i
+const DOCKERFILE = /^dockerfile$|\.dockerfile$/i
+
+/** What a test project's name says it tests: `Tests.Orders.Api` and `Orders.Api.Tests` both test `Orders.Api`. A bare `tests` folder names nothing. */
+const testedName = (folder: string) =>
+  /^(tests?|__tests__|e2e|specs?)$/i.test(folder) ? '' : folder.replace(/^tests?[.\-_]/i, '').replace(/[.\-_](unit|integration|functional|acceptance|e2e)?tests?$/i, '').toLowerCase()
+
+/**
+ * Which service each README, Dockerfile, and test belongs to, so a monorepo
+ * scores each of its services on its own files.
+ *
+ * A README documents the service whose folder holds it directly, or every
+ * service below it while that folder holds no other: a monorepo's root
+ * README, or a workload folder's README over two apps, documents no single
+ * one. A README deeper inside a service describes that subfolder, often a
+ * bundled library, and is not the service's.
+ *
+ * A Dockerfile builds the deepest service whose folder holds it, and any
+ * service below it that it names by folder, which is how one Dockerfile
+ * says which of several apps it ships. One in a folder above a single
+ * service builds that service.
+ *
+ * Tests belong to the deepest service whose folder holds them. A test
+ * project named for a service, such as `Tests.Orders.Api`, belongs to it
+ * wherever it sits. Infrastructure is left out of the sharing: an app and
+ * the Terraform it stands on are one thing to document.
+ */
+export async function serviceFiles(paths: string[], services: DetectedService[], read: Read): Promise<ServiceFiles[]> {
+  const result: ServiceFiles[] = services.map(() => ({ readme: false, dockerfile: false, tests: false }))
+  const apps = services.map((s, i) => ({ s, i })).filter(({ s }) => s.type !== 'infrastructure')
+  /** The deepest service whose folder holds the path. */
+  const holder = (path: string): number | null => {
+    const holders = services.map((s, i) => ({ s, i })).filter(({ s }) => within(path, s.path))
+    return holders.length > 0 ? holders.reduce((a, b) => (b.s.path.length > a.s.path.length ? b : a)).i : null
+  }
+  /** The services the nearest folder above `dir` that holds any of them holds. */
+  const below = (dir: string) => {
+    for (let d = dir; ; d = dirOf(d)) {
+      const under = apps.filter(({ s }) => within(s.path, d))
+      if (under.length > 0 || d === '') return under
+    }
+  }
+  for (const path of paths) {
+    const folders = path.split('/').slice(0, -1)
+    if (folders.some((f) => FOREIGN.has(f.toLowerCase()))) continue
+    const name = baseOf(path)
+    const dir = dirOf(path)
+    if (README.test(name)) {
+      const own = services.findIndex((s) => s.path === dir)
+      if (own >= 0) result[own]!.readme = true
+      else if (holder(path) === null) {
+        const under = below(dir)
+        if (under.length === 1) result[under[0]!.i]!.readme = true
+      }
+      continue
+    }
+    if (DOCKERFILE.test(name)) {
+      const own = holder(path)
+      const under = below(dir).filter(({ s }) => s.path !== dir && within(s.path, dir) && (own === null || s.path !== services[own]!.path))
+      if (own !== null) result[own]!.dockerfile = true
+      else if (under.length === 1) result[under[0]!.i]!.dockerfile = true
+      if (under.length > (own === null ? 1 : 0)) {
+        const text = (await read(path)) ?? ''
+        for (const { s, i } of under) if (new RegExp(`(^|[\\s/"'.])${escape(s.path.slice(dir ? dir.length + 1 : 0))}([\\s/"']|$)`, 'm').test(text)) result[i]!.dockerfile = true
+      }
+      continue
+    }
+    if (!languageOfFile(path)) continue
+    const testDirs = folders.filter((f) => TEST_DIR.test(f))
+    if (testDirs.length === 0 && !TEST_FILE.test(path)) continue
+    const tested = testDirs.map(testedName).findLast((n) => n !== '') ?? ''
+    const named = tested ? apps.find(({ s }) => baseOf(s.path).toLowerCase() === tested || s.name.toLowerCase() === tested) : undefined
+    const i = named ? named.i : (holder(path) ?? (below(dir).length === 1 ? below(dir)[0]!.i : null))
+    if (i !== null) result[i]!.tests = true
+  }
+  return result
+}
+
+const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /**
  * One folder is one service. Where two build files claim it, the stronger

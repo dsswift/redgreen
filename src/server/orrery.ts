@@ -126,6 +126,9 @@ export const SERVICE_BLUEPRINT = {
     last_changed_by: { type: 'string', title: 'Last changed by', description: "Who made the newest commit on the default branch that touched the service's folder, as the forge names them." },
     type: { type: 'enum', values: ['backend', 'frontend', 'library', 'infrastructure', 'tool', 'docs', 'other'], description: 'What kind of thing it is, read from the files that build it.' },
     language: { type: 'enum', values: [...LANGUAGES], sticky: true, description: 'What the service is written in, read from the files that build it. A repository that holds several services can hold several languages; this is the one for this service. A person who knows better changes it, and that change stays.' },
+    has_readme: { type: 'boolean', title: 'Has README', description: "A README in the service's own folder, or in the nearest folder above it that holds no other service. A monorepo's root README documents no single service." },
+    has_dockerfile: { type: 'boolean', title: 'Has Dockerfile', description: 'A Dockerfile that builds this service, found the same way as its README. Two services in one repository can differ.' },
+    has_tests: { type: 'boolean', title: 'Has tests', description: 'Automated tests that belong to this service: test files in its folder, or a test project beside it named for it, such as Tests.Orders.Api.' },
   },
   relations: {
     repository: { target: 'repository', many: false, title: 'Homed in', inverseTitle: 'Services' },
@@ -190,7 +193,7 @@ export function toServices(repo: RepoSnapshot): ServiceEntity[] {
       key: s.id ? `${key}/${s.id.toLowerCase()}` : key,
       title: s.name,
       ...(icon ? { icon } : {}),
-      fields: { path: s.path, type: s.type, language: s.language, last_changed_at: s.changedAt ?? null, last_changed_by: s.changedBy ?? null },
+      fields: { path: s.path, type: s.type, language: s.language, last_changed_at: s.changedAt ?? null, last_changed_by: s.changedBy ?? null, has_readme: s.files?.readme ?? null, has_dockerfile: s.files?.dockerfile ?? null, has_tests: s.files?.tests ?? null },
       relations: { repository: key },
     }
   })

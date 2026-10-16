@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { SERVICE_RULES, budgeted, detectServices, readServices, type RepoFiles } from './services.ts'
+import { SERVICE_RULES, budgeted, detectServices, readServices, serviceFiles, type RepoFiles } from './services.ts'
 
 /** A repository held in memory: path to contents. A path mapped to '' exists and says nothing. */
 const repo = (files: Record<string, string>) => ({ paths: Object.keys(files), read: async (p: string) => files[p] ?? null })
@@ -84,6 +84,87 @@ describe('a repository with nothing that runs', () => {
     expect(await detect({ 'scripts/a.ps1': '', 'scripts/b.ps1': '', 'README.md': '' }, 'defaults')).toEqual(['. tool PowerShell defaults'])
     expect(await detect({ 'a.md': '', 'b.md': '', 'c.md': '', 'd.md': '', 'toc.js': '' }, 'notes')).toEqual([])
     expect(await detect({ 'README.md': '' }, 'empty')).toEqual([])
+  })
+})
+
+describe('what each service carries in its own folder', () => {
+  const carried = async (files: Record<string, string>, name = 'shop') => {
+    const r = repo(files)
+    return Object.fromEntries((await detectServices(r.paths, r.read, name)).map((s) => [s.id || '.', s.files]))
+  }
+  const fn = csproj('<AzureFunctionsVersion>v4</AzureFunctionsVersion>')
+
+  it('scores each service in a monorepo on its own README, Dockerfile, and tests', async () => {
+    expect(
+      await carried({
+        'README.md': '',
+        'workloads/projects/README.md': '',
+        'workloads/projects/Api/Api.csproj': fn,
+        'workloads/projects/Api/Dockerfile': '',
+        'workloads/projects/Tests.Api/Tests.Api.csproj': csproj('<IsTestProject>true</IsTestProject>'),
+        'workloads/projects/Tests.Api/HandlerTests.cs': '',
+        'workloads/billing/Ingestor/Ingestor.csproj': fn,
+        'workloads/billing/Ingestor/README.md': '',
+        'workloads/web/console/Console.csproj': csproj('', 'Microsoft.NET.Sdk.Web'),
+        'workloads/web/console/Dockerfile': '',
+      }),
+    ).toEqual({
+      'workloads/billing/Ingestor': { readme: true, dockerfile: false, tests: false },
+      'workloads/projects/Api': { readme: true, dockerfile: true, tests: true },
+      'workloads/web/console': { readme: false, dockerfile: true, tests: false },
+    })
+  })
+
+  it('gives a test project to the service it is named for, either way round', async () => {
+    const services = [
+      { id: 'src/Orders.Api', path: 'src/Orders.Api', name: 'Orders.Api', type: 'backend' as const, language: 'C#' as const },
+      { id: 'src/Billing', path: 'src/Billing', name: 'Billing', type: 'backend' as const, language: 'C#' as const },
+    ]
+    const none = async () => null
+    expect((await serviceFiles(['test/Orders.Api.UnitTests/OrderTests.cs'], services, none)).map((f) => f.tests)).toEqual([true, false])
+    expect((await serviceFiles(['test/Tests.Billing/BillTests.cs'], services, none)).map((f) => f.tests)).toEqual([false, true])
+  })
+
+  it('finds tests by the file names each language uses', async () => {
+    const tool = async (path: string) => (await serviceFiles([path], [{ id: '', path: '', name: 'x', type: 'tool', language: null }], async () => null))[0]!.tests
+    expect(await Promise.all(['sync/run_test.go', 'src/app.test.ts', 'src/app.spec.tsx', 'pkg/test_sync.py', 'src/app.ts', 'docs/testing.md'].map(tool))).toEqual([true, true, true, true, false, false])
+  })
+
+  it('gives a lone service the README at the root, and leaves its Terraform out of the count', async () => {
+    expect(await carried({ 'README.md': '', 'Dockerfile': 'FROM golang', 'main.go': 'package main\nfunc main() {}\n', 'main_test.go': '', 'infra/main.tf': 'terraform {\n  backend azurerm {}\n}\n' }, 'pusher')).toEqual({
+      '.': { readme: true, dockerfile: true, tests: true },
+      infra: { readme: false, dockerfile: false, tests: false },
+    })
+  })
+
+  it('gives a Dockerfile above several services to the ones it copies, and a README there to none', async () => {
+    expect(
+      await carried({
+        'web/README.md': '',
+        'web/Dockerfile': 'COPY Portal/Portal.csproj Portal/\nCOPY . .\n',
+        'web/Portal/Portal.csproj': csproj('', 'Microsoft.NET.Sdk.Web'),
+        'web/Admin/Admin.csproj': csproj('<OutputType>Exe</OutputType>'),
+      }),
+    ).toEqual({ 'web/Admin': { readme: false, dockerfile: false, tests: false }, 'web/Portal': { readme: false, dockerfile: true, tests: false } })
+  })
+
+  it('gives a Dockerfile held by one service to the services below it that it builds', async () => {
+    expect(
+      await carried({
+        'package.json': JSON.stringify({ scripts: { start: 'node .' } }),
+        'go.Dockerfile': 'COPY cmd ./cmd\nRUN go build -o /out/agent ./cmd/agent\n',
+        'cmd/agent/main.go': 'package main\nfunc main() {}\n',
+        'cmd/admin/main.go': 'package main\nfunc main() {}\n',
+      }),
+    ).toEqual({ '.': { readme: false, dockerfile: true, tests: false }, 'cmd/admin': { readme: false, dockerfile: false, tests: false }, 'cmd/agent': { readme: false, dockerfile: true, tests: false } })
+  })
+
+  it('does not take a README inside a service, such as a bundled library, for the service', async () => {
+    expect(await carried({ 'site/Site.csproj': csproj('', 'Microsoft.NET.Sdk.Web'), 'site/wwwroot/lib/README.md': '' })).toEqual({ site: { readme: false, dockerfile: false, tests: false } })
+  })
+
+  it('counts nothing a dependency folder brings in', async () => {
+    expect(await carried({ 'package.json': JSON.stringify({ scripts: { start: 'node .' } }), 'node_modules/lib/README.md': '', 'node_modules/lib/lib.test.js': '' })).toEqual({ '.': { readme: false, dockerfile: false, tests: false } })
   })
 })
 

@@ -149,6 +149,22 @@ export interface DetectedService {
   changedAt?: string | null
   /** Who made that commit, as the forge names them. Null when the forge could not say. */
   changedBy?: string | null
+  /** What sits beside the service in its own folder. Absent on services read under rules older than these facts. */
+  files?: ServiceFiles
+}
+
+/**
+ * What one service carries in its own folder, so two services in one
+ * repository can differ: one documented and one not, one in a container and
+ * one not. A folder that holds other services owns only what is not theirs.
+ */
+export interface ServiceFiles {
+  /** A README in the service's folder, or in the nearest folder above it that holds no other service. */
+  readme: boolean
+  /** A Dockerfile that builds the service, by the same ownership as the README. */
+  dockerfile: boolean
+  /** Automated tests that belong to it: inside its folder, or a test project beside it named for it. */
+  tests: boolean
 }
 
 /** The services found at one commit of the default branch. */
