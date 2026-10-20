@@ -72,7 +72,14 @@ Estate health board. Read `README.md` first.
   fight their edits.
 - The blueprints offered to the hub leave their fields open. Locking a field
   is the architect's choice, made in the hub.
-- `package.json` is the version of record. The release tag must match it.
+- `package.json` is the version of record.
+
+## Releases
+
+Commit on `main` and land with `release-damnit land`. CI versions every `feat`
+and `fix` since the last release tag, tags it, and builds the tag's image.
+Never edit the version in `package.json`, `package-lock.json`, the manifest, or
+`CHANGELOG.md` by hand.
 
 ## Checks
 

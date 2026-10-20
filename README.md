@@ -129,9 +129,8 @@ docker build --platform linux/amd64 -t redgreen .
 docker run -p 8080:8080 -v redgreen-data:/data -e PUBLIC_URL=https://redgreen.example.org redgreen
 ```
 
-Pushing a tag `vX.Y.Z` that matches `package.json` publishes the image from
-CI, to the project's Azure registry and to the public GitHub Container Registry
-as `ghcr.io/dsswift/redgreen`. A cluster pulls that with no secret; pin it by
+Each release CI cuts on `main` publishes the image, tagged with the version, to
+the public GitHub Container Registry as `ghcr.io/dsswift/redgreen`. A cluster pulls that with no secret; pin it by
 digest. The image carries the server's TypeScript source, as it runs, without
 its tests.
 One replica, one volume; the database is SQLite.
