@@ -1,6 +1,6 @@
 import type { Octokit } from 'octokit'
 import type { Logger } from '../../log.ts'
-import type { RepoFiles } from '../../services.ts'
+import { HUMAN_LOOKBACK, lastChangeOf, type RepoFiles } from '../../services.ts'
 import { isStatus } from '../errors.ts'
 
 /** A repository's files at the head of its default branch, or null for an empty one. Files are read as blobs by hash, so a read is cached for good. */
@@ -30,9 +30,8 @@ export async function githubFiles(kit: Octokit, fullName: string, branch: string
       return data.encoding === 'base64' ? Buffer.from(data.content, 'base64').toString('utf8') : data.content
     },
     lastChange: async (path) => {
-      const { data } = await kit.request('GET /repos/{owner}/{repo}/commits', { owner, repo, sha: commit, per_page: 1, ...(path ? { path } : {}) })
-      const last = data[0]
-      return last ? { at: last.commit.committer?.date ?? last.commit.author?.date ?? null, by: last.author?.login ?? last.commit.author?.name ?? null } : null
+      const { data } = await kit.request('GET /repos/{owner}/{repo}/commits', { owner, repo, sha: commit, per_page: HUMAN_LOOKBACK, ...(path ? { path } : {}) })
+      return lastChangeOf(data.map((c) => ({ at: c.commit.committer?.date ?? c.commit.author?.date ?? null, by: c.author?.login ?? c.commit.author?.name ?? null, email: c.commit.author?.email ?? (c.author?.type === 'Bot' ? '[bot]' : null) })))
     },
   }
 }

@@ -10,12 +10,40 @@ import { languageOfFile, mainLanguage, type Language } from '../shared/languages
 import type { DetectedService, RepoServices, ServiceFiles, ServiceType } from '../shared/model.ts'
 
 /** Bump on any change to the rules below, so every repository is read again instead of trusting its last answer. */
-export const SERVICE_RULES = 4
+export const SERVICE_RULES = 5
 
-/** The newest commit that touched a folder. Either part is null when the forge left it out. */
+/** A commit as a forge names it. Either part is null when the forge left it out. */
+export interface Commit {
+  at: string | null
+  by: string | null
+  email?: string | null
+}
+
+/** The newest commit that touched a folder, and the newest of those made by a person. Either part is null when the forge left it out. */
 export interface LastChange {
   at: string | null
   by: string | null
+  humanAt: string | null
+  humanBy: string | null
+}
+
+/** Commits read per folder while looking for the newest one a person made. */
+export const HUMAN_LOOKBACK = 30
+
+const BOT_PATTERN = /\[bot\]|(^|[-_ ])bot$|^bot[-_ ]|release-damnit|github-actions|dependabot|renovate|project_\d+_bot|^gitlab-?ci/i
+
+/** Whether a commit came from automation: a release tool, a dependency updater, a CI job. `BOT_AUTHORS` adds comma separated names or addresses. */
+export function isBot(commit: Commit, extra: string[] = (process.env.BOT_AUTHORS ?? '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean)): boolean {
+  const names = [commit.by, commit.email].filter((x): x is string => !!x)
+  return names.some((n) => BOT_PATTERN.test(n) || extra.includes(n.toLowerCase()))
+}
+
+/** The newest commit, and the newest one a person made, from commits listed newest first. Null when there are none. */
+export function lastChangeOf(commits: Commit[]): LastChange | null {
+  const [newest] = commits
+  if (!newest) return null
+  const human = commits.find((c) => !isBot(c))
+  return { at: newest.at, by: newest.by, humanAt: human?.at ?? null, humanBy: human?.by ?? null }
 }
 
 /** A repository's files at the head of its default branch. */
@@ -25,7 +53,7 @@ export interface RepoFiles {
   list(): Promise<string[]>
   /** One file's text, or null when it cannot be read. */
   read(path: string): Promise<string | null>
-  /** When the newest commit at or before this one touched `path`, a folder or `''` for the root, and who made it. Null when the forge cannot say. */
+  /** When the newest commits at or before this one touched `path`, a folder or `''` for the root, and who made the newest and the newest by a person. Null when the forge cannot say. */
   lastChange(path: string): Promise<LastChange | null>
 }
 
@@ -403,7 +431,7 @@ export async function readServices(files: RepoFiles | null, repoName: string, pr
   const services = await Promise.all(
     found.map(async (s) => {
       const last = await files.lastChange(s.path)
-      return { ...s, changedAt: last?.at ?? null, changedBy: last?.by ?? null }
+      return { ...s, changedAt: last?.at ?? null, changedBy: last?.by ?? null, humanChangedAt: last?.humanAt ?? null, humanChangedBy: last?.humanBy ?? null }
     }),
   )
   return { services: { commit: files.commit, rules: SERVICE_RULES, services }, reused: false, read: reader.spent() }

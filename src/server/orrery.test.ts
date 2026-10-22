@@ -82,7 +82,7 @@ describe('toServices', () => {
         rules: 1,
         services: [
           { id: '', path: '', name: 'Payments', type: 'backend', language: 'Go' },
-          { id: 'web/Checkout', path: 'web/Checkout', name: 'checkout', type: 'frontend', language: 'TypeScript', changedAt: '2026-10-01T09:00:00Z', changedBy: 'a-developer' },
+          { id: 'web/Checkout', path: 'web/Checkout', name: 'checkout', type: 'frontend', language: 'TypeScript', changedAt: '2026-10-01T09:00:00Z', changedBy: 'release-damnit', humanChangedAt: '2026-09-30T09:00:00Z', humanChangedBy: 'a-developer' },
           { id: 'deploy', path: 'deploy', name: 'Payments infrastructure', type: 'infrastructure', language: null },
         ],
       },
@@ -92,7 +92,7 @@ describe('toServices', () => {
       ['github/example/payments/web/checkout', 'typescript'],
       ['github/example/payments/deploy', undefined],
     ])
-    expect(out[1]).toMatchObject({ blueprint: 'service', title: 'checkout', fields: { path: 'web/Checkout', type: 'frontend', language: 'TypeScript', last_changed_at: '2026-10-01T09:00:00Z', last_changed_by: 'a-developer' }, relations: { repository: 'github/example/payments' } })
+    expect(out[1]).toMatchObject({ blueprint: 'service', title: 'checkout', fields: { path: 'web/Checkout', type: 'frontend', language: 'TypeScript', last_changed_at: '2026-10-01T09:00:00Z', last_changed_by: 'release-damnit', last_human_changed_at: '2026-09-30T09:00:00Z', last_human_changed_by: 'a-developer' }, relations: { repository: 'github/example/payments' } })
     for (const s of out) expect(Object.keys(s.fields).filter((f) => !(f in SERVICE_BLUEPRINT.fields))).toEqual([])
   })
 

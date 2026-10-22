@@ -149,6 +149,10 @@ export interface DetectedService {
   changedAt?: string | null
   /** Who made that commit, as the forge names them. Null when the forge could not say. */
   changedBy?: string | null
+  /** When the newest commit by a person, not a bot or release tool, touched the folder. Null when none in the recent history. */
+  humanChangedAt?: string | null
+  /** Who made that commit, as the forge names them. */
+  humanChangedBy?: string | null
   /** What sits beside the service in its own folder. Absent on services read under rules older than these facts. */
   files?: ServiceFiles
 }

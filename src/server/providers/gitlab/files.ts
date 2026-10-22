@@ -1,4 +1,4 @@
-import type { RepoFiles } from '../../services.ts'
+import { HUMAN_LOOKBACK, lastChangeOf, type RepoFiles } from '../../services.ts'
 import { isStatus } from '../errors.ts'
 import type { GitlabClient } from './client.ts'
 
@@ -24,8 +24,8 @@ export async function gitlabFiles(client: GitlabClient, projectId: number, branc
       }
     },
     lastChange: async (path) => {
-      const [last] = await client.get<{ committed_date?: string | null; author_name?: string | null; committer_name?: string | null }[]>(`projects/${projectId}/repository/commits`, { ref_name: commit, per_page: 1, ...(path ? { path } : {}) })
-      return last ? { at: last.committed_date ?? null, by: last.author_name ?? last.committer_name ?? null } : null
+      const list = await client.get<{ committed_date?: string | null; author_name?: string | null; author_email?: string | null; committer_name?: string | null }[]>(`projects/${projectId}/repository/commits`, { ref_name: commit, per_page: HUMAN_LOOKBACK, ...(path ? { path } : {}) })
+      return lastChangeOf(list.map((c) => ({ at: c.committed_date ?? null, by: c.author_name ?? c.committer_name ?? null, email: c.author_email ?? null })))
     },
   }
 }
