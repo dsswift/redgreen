@@ -49,7 +49,26 @@ CREATE TABLE IF NOT EXISTS http_cache (
   body TEXT NOT NULL,
   touched_at TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS http_cache_touched ON http_cache(touched_at);
 `
+
+/**
+ * The largest response body the HTTP cache keeps. Every query on this
+ * database runs on the event loop, so a cache that grows without bound stalls
+ * the server, health checks included. A body this large is almost always
+ * addressed by a commit and never asked for again.
+ */
+export const MAX_CACHED_BODY = 256 * 1024
+
+/**
+ * Schema upgrades, applied in order once per database file. `PRAGMA
+ * user_version` records how many have run. Append only.
+ */
+const UPGRADES: { name: string; sql: string }[] = [
+  // The cache kept every body, and whole file trees piled up by the hundred.
+  // It is only a cache, so it starts again empty and bounded.
+  { name: 'drop unbounded http cache', sql: 'DROP TABLE IF EXISTS http_cache;' },
+]
 
 /** Provider-specific handle for reaching an account, e.g. a GitHub App installation id. */
 export type Connection = { type: 'github-app'; installationId: number } | { type: 'github-token' } | { type: 'gitlab-oauth' } | { type: 'gitlab-token' } | { type: 'azuredevops-service-principal' }
@@ -89,12 +108,26 @@ export interface CachedResponse {
 
 export class Store {
   private readonly db: DatabaseSync
+  /** The upgrades this open applied, by name. Empty when the file was already current. */
+  readonly upgraded: string[]
 
   constructor(path: string) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true })
     this.db = new DatabaseSync(path)
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;')
+    this.upgraded = this.upgrade()
     this.db.exec(SCHEMA)
+  }
+
+  private upgrade(): string[] {
+    const { user_version: version } = this.db.prepare('PRAGMA user_version').get() as { user_version: number }
+    const pending = UPGRADES.slice(version)
+    if (pending.length === 0) return []
+    for (const step of pending) this.db.exec(step.sql)
+    this.db.exec(`PRAGMA user_version = ${UPGRADES.length}`)
+    // Gives the freed pages back, so the file is no larger than what it holds.
+    this.db.exec('VACUUM')
+    return pending.map((step) => step.name)
   }
 
   close(): void {
@@ -283,7 +316,12 @@ export class Store {
     return row ?? null
   }
 
+  /** Keeps a response for the next conditional request. A body over `MAX_CACHED_BODY` is not kept, and drops what was kept for the key. */
   putCached(key: string, etag: string, body: string, now: string): void {
+    if (body.length > MAX_CACHED_BODY) {
+      this.db.prepare('DELETE FROM http_cache WHERE key = ?').run(key)
+      return
+    }
     this.db
       .prepare(
         `INSERT INTO http_cache (key, etag, body, touched_at) VALUES (?, ?, ?, ?)
