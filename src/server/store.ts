@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import type { Account, ProviderKind, RepoSnapshot } from '../shared/model.ts'
@@ -61,14 +61,49 @@ CREATE INDEX IF NOT EXISTS http_cache_touched ON http_cache(touched_at);
 export const MAX_CACHED_BODY = 256 * 1024
 
 /**
- * Schema upgrades, applied in order once per database file. `PRAGMA
- * user_version` records how many have run. Append only.
+ * Raised when the HTTP cache must start again empty. A file's `PRAGMA
+ * user_version` records the generation it was written with. Generation 1
+ * bounded the cache: before it, whole file trees piled up by the hundred.
  */
-const UPGRADES: { name: string; sql: string }[] = [
-  // The cache kept every body, and whole file trees piled up by the hundred.
-  // It is only a cache, so it starts again empty and bounded.
-  { name: 'drop unbounded http cache', sql: 'DROP TABLE IF EXISTS http_cache;' },
-]
+const CACHE_GENERATION = 1
+
+/** Every table but the cache. A cache reset copies these and nothing else. */
+const KEPT_TABLES = ['settings', 'accounts', 'repos', 'repo_settings', 'level_history']
+
+/**
+ * Starts the cache again empty when the file predates `CACHE_GENERATION`.
+ * Dropping a table reads every page it frees, which takes minutes on a slow
+ * volume, so the kept tables are copied into a new file that replaces the
+ * old one. The old file is untouched until the copy is complete. Answers
+ * whether the cache was reset.
+ */
+function resetCache(path: string): boolean {
+  if (!existsSync(path)) return false
+  const fresh = `${path}.reset`
+  const old = new DatabaseSync(path)
+  try {
+    const { user_version: generation } = old.prepare('PRAGMA user_version').get() as { user_version: number }
+    if (generation >= CACHE_GENERATION) return false
+    rmSync(fresh, { force: true })
+    const next = new DatabaseSync(fresh)
+    next.exec(SCHEMA)
+    next.exec(`PRAGMA user_version = ${CACHE_GENERATION}`)
+    next.close()
+    old.prepare('ATTACH DATABASE ? AS fresh').run(fresh)
+    old.exec('BEGIN')
+    for (const table of KEPT_TABLES) {
+      const columns = (old.prepare(`PRAGMA main.table_info(${table})`).all() as { name: string }[]).map((c) => `"${c.name}"`).join(', ')
+      if (columns) old.exec(`INSERT INTO fresh.${table} (${columns}) SELECT ${columns} FROM main.${table}`)
+    }
+    old.exec('COMMIT')
+    old.exec('DETACH DATABASE fresh')
+  } finally {
+    old.close()
+  }
+  renameSync(fresh, path)
+  for (const suffix of ['-wal', '-shm']) rmSync(path + suffix, { force: true })
+  return true
+}
 
 /** Provider-specific handle for reaching an account, e.g. a GitHub App installation id. */
 export type Connection = { type: 'github-app'; installationId: number } | { type: 'github-token' } | { type: 'gitlab-oauth' } | { type: 'gitlab-token' } | { type: 'azuredevops-service-principal' }
@@ -108,26 +143,17 @@ export interface CachedResponse {
 
 export class Store {
   private readonly db: DatabaseSync
-  /** The upgrades this open applied, by name. Empty when the file was already current. */
-  readonly upgraded: string[]
+  /** True when this open started the HTTP cache again empty. */
+  readonly cacheReset: boolean
 
   constructor(path: string) {
-    if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true })
+    const file = path !== ':memory:'
+    if (file) mkdirSync(dirname(path), { recursive: true })
+    this.cacheReset = file && resetCache(path)
     this.db = new DatabaseSync(path)
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;')
-    this.upgraded = this.upgrade()
     this.db.exec(SCHEMA)
-  }
-
-  private upgrade(): string[] {
-    const { user_version: version } = this.db.prepare('PRAGMA user_version').get() as { user_version: number }
-    const pending = UPGRADES.slice(version)
-    if (pending.length === 0) return []
-    for (const step of pending) this.db.exec(step.sql)
-    this.db.exec(`PRAGMA user_version = ${UPGRADES.length}`)
-    // Gives the freed pages back, so the file is no larger than what it holds.
-    this.db.exec('VACUUM')
-    return pending.map((step) => step.name)
+    this.db.exec(`PRAGMA user_version = ${CACHE_GENERATION}`)
   }
 
   close(): void {

@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs'
+import { existsSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -35,7 +35,7 @@ describe('http cache', () => {
   })
 })
 
-describe('upgrades', () => {
+describe('cache reset', () => {
   it('empties a cache written before the limit and keeps everything else', () => {
     const path = join(mkdtempSync(join(tmpdir(), 'redgreen-store-')), 'redgreen.sqlite')
     const legacy = new DatabaseSync(path)
@@ -48,11 +48,12 @@ describe('upgrades', () => {
     legacy.close()
 
     const store = new Store(path)
-    expect(store.upgraded).toEqual(['drop unbounded http cache'])
+    expect(store.cacheReset).toBe(true)
     expect(store.getCached('tree')).toBeNull()
     expect(store.getSetting('rules')).toEqual({ stale: 'off' })
     store.close()
+    expect(existsSync(`${path}.reset`)).toBe(false)
 
-    expect(new Store(path).upgraded).toEqual([])
+    expect(new Store(path).cacheReset).toBe(false)
   })
 })
