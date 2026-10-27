@@ -65,7 +65,7 @@ function fakeClient(over: Record<string, unknown> = {}, project: typeof PROJECT 
       { id: 8, ref: 'main', sha: 'abb', status: 'running', created_at: '2026-09-30T00:00:00Z', updated_at: '2026-09-30T00:01:00Z', environment: { name: 'production' }, user: null, deployable: null },
     ],
     'projects/42/pipeline_schedules/5/pipelines': [pipeline({ id: 2, source: 'schedule', created_at: '2026-09-30T02:00:00Z' })],
-    'projects/42/repository/branches/main': { name: 'main', protected: true, commit: { id: 'abc', author_name: 'A Developer', committer_name: 'GitLab', committed_date: '2026-09-30T02:30:00Z', authored_date: '2026-09-30T02:20:00Z' } },
+    'projects/42/repository/branches/main': { name: 'main', protected: true, commit: { id: 'abc', author_name: 'A Developer', author_email: 'A.Developer@Example.com', committer_name: 'GitLab', committed_date: '2026-09-30T02:30:00Z', authored_date: '2026-09-30T02:20:00Z' } },
     'projects/42/protected_branches/main': { name: 'main' },
     'projects/42/approval_rules': 404,
     'projects/42/repository/tree': [{ name: 'README.md', type: 'blob' }, { name: 'Dockerfile', type: 'blob' }, { name: 'src', type: 'tree' }],
@@ -133,6 +133,7 @@ describe('syncGitlabRepo', () => {
       hasReadme: true,
       hasDockerfile: true,
       lastCommitter: 'A Developer',
+      lastCommitterEmail: 'a.developer@example.com',
       lastCommitAt: '2026-09-30T02:30:00Z',
     })
   })

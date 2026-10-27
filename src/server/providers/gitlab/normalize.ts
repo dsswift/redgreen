@@ -3,6 +3,7 @@
 
 import { mainLanguage } from '../../../shared/languages.ts'
 import type { AlertCounts, ChecksState, Deployment, Pipeline, PipelineState, RepoFacts, Run, RunConclusion, RunStatus, RunTrigger, Schedule } from '../../../shared/model.ts'
+import { emailOf } from '../../services.ts'
 import { RAILS_TIME_ZONES } from './timezones.ts'
 
 export interface GlNamespace {
@@ -61,7 +62,7 @@ export interface GlProject {
 export interface GlBranch {
   name: string
   protected: boolean
-  commit: { id: string; author_name: string | null; committer_name: string | null; committed_date: string | null; authored_date: string | null }
+  commit: { id: string; author_name: string | null; author_email?: string | null; committer_name: string | null; committer_email?: string | null; committed_date: string | null; authored_date: string | null }
 }
 
 /** The rules on a protected branch. `code_owner_approval_required` is a paid-tier setting and absent on the free tier. */
@@ -309,6 +310,7 @@ export function toFacts(project: GlProject, branch: GlBranch | null, protection:
     hasReadme: names ? names.some((n) => n.startsWith('readme')) : null,
     hasDockerfile: names ? names.some((n) => n === 'dockerfile' || n.endsWith('.dockerfile')) : null,
     lastCommitter: branch?.commit.author_name ?? branch?.commit.committer_name ?? null,
+    lastCommitterEmail: emailOf(branch?.commit.author_email ?? branch?.commit.committer_email),
     lastCommitAt: branch?.commit.committed_date ?? branch?.commit.authored_date ?? null,
   }
 }

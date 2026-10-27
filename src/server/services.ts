@@ -10,7 +10,7 @@ import { languageOfFile, mainLanguage, type Language } from '../shared/languages
 import type { DetectedService, RepoServices, ServiceFiles, ServiceType } from '../shared/model.ts'
 
 /** Bump on any change to the rules below, so every repository is read again instead of trusting its last answer. */
-export const SERVICE_RULES = 5
+export const SERVICE_RULES = 6
 
 /** A commit as a forge names it. Either part is null when the forge left it out. */
 export interface Commit {
@@ -23,8 +23,10 @@ export interface Commit {
 export interface LastChange {
   at: string | null
   by: string | null
+  email: string | null
   humanAt: string | null
   humanBy: string | null
+  humanEmail: string | null
 }
 
 /** Commits read per folder while looking for the newest one a person made. */
@@ -43,7 +45,13 @@ export function lastChangeOf(commits: Commit[]): LastChange | null {
   const [newest] = commits
   if (!newest) return null
   const human = commits.find((c) => !isBot(c))
-  return { at: newest.at, by: newest.by, humanAt: human?.at ?? null, humanBy: human?.by ?? null }
+  return { at: newest.at, by: newest.by, email: emailOf(newest.email), humanAt: human?.at ?? null, humanBy: human?.by ?? null, humanEmail: emailOf(human?.email) }
+}
+
+/** An address as the hub matches it: lowercase and trimmed. Anything that is not an address is null. */
+export function emailOf(v: string | null | undefined): string | null {
+  const s = v?.trim().toLowerCase()
+  return s && /^[^@\s]+@[^@\s]+$/.test(s) ? s : null
 }
 
 /** A repository's files at the head of its default branch. */
@@ -431,7 +439,7 @@ export async function readServices(files: RepoFiles | null, repoName: string, pr
   const services = await Promise.all(
     found.map(async (s) => {
       const last = await files.lastChange(s.path)
-      return { ...s, changedAt: last?.at ?? null, changedBy: last?.by ?? null, humanChangedAt: last?.humanAt ?? null, humanChangedBy: last?.humanBy ?? null }
+      return { ...s, changedAt: last?.at ?? null, changedBy: last?.by ?? null, changedByEmail: last?.email ?? null, humanChangedAt: last?.humanAt ?? null, humanChangedBy: last?.humanBy ?? null, humanChangedByEmail: last?.humanEmail ?? null }
     }),
   )
   return { services: { commit: files.commit, rules: SERVICE_RULES, services }, reused: false, read: reader.spent() }

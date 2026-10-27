@@ -1,6 +1,7 @@
 import type { Octokit } from 'octokit'
 import type { Deployment, Pipeline, PullRequest, Release, RepoFacts, RepoSnapshot, Run, Schedule } from '../../../shared/model.ts'
 import type { Logger } from '../../log.ts'
+import { emailOf } from '../../services.ts'
 import { isStatus } from '../errors.ts'
 import {
   checksState,
@@ -189,9 +190,10 @@ async function fetchFacts(kit: Octokit, params: RepoParams, gh: GhRepo, log: Log
     tolerate('.github', () => kit.request('GET /repos/{owner}/{repo}/contents/{path}', { ...params, path: '.github' })),
   ])
   if (branch) {
-    const b = branch.data as { protected?: boolean; commit?: { commit?: { author?: { name?: string; date?: string } }; author?: { login?: string } | null } }
+    const b = branch.data as { protected?: boolean; commit?: { commit?: { author?: { name?: string; email?: string; date?: string } }; author?: { login?: string } | null } }
     facts.branchProtected = !!b.protected
     facts.lastCommitter = b.commit?.author?.login ?? b.commit?.commit?.author?.name ?? null
+    facts.lastCommitterEmail = emailOf(b.commit?.commit?.author?.email)
     facts.lastCommitAt = b.commit?.commit?.author?.date ?? null
   }
   const ruleList = (rules?.data ?? []) as { type: string; parameters?: { required_approving_review_count?: number; require_code_owner_review?: boolean } }[]

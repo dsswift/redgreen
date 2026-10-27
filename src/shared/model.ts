@@ -129,6 +129,8 @@ export interface RepoFacts {
   hasReadme: boolean | null
   hasDockerfile: boolean | null
   lastCommitter: string | null
+  /** The address on that commit, lowercase. Null when the forge left it out. */
+  lastCommitterEmail?: string | null
   lastCommitAt: string | null
 }
 
@@ -149,10 +151,14 @@ export interface DetectedService {
   changedAt?: string | null
   /** Who made that commit, as the forge names them. Null when the forge could not say. */
   changedBy?: string | null
+  /** The address on that commit, lowercase. Null when the forge left it out. */
+  changedByEmail?: string | null
   /** When the newest commit by a person, not a bot or release tool, touched the folder. Null when none in the recent history. */
   humanChangedAt?: string | null
   /** Who made that commit, as the forge names them. */
   humanChangedBy?: string | null
+  /** The address on that commit, lowercase. */
+  humanChangedByEmail?: string | null
   /** What sits beside the service in its own folder. Absent on services read under rules older than these facts. */
   files?: ServiceFiles
 }

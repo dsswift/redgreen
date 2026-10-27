@@ -75,7 +75,8 @@ export const REPOSITORY_BLUEPRINT = {
     has_ci: { type: 'boolean', title: 'Has CI' },
     last_push: { type: 'datetime' },
     freshness_days: { type: 'number', title: 'Freshness (days)', calculation: 'days_since(last_push)' },
-    last_committer: { type: 'string' },
+    last_committer: { type: 'string', description: 'Who made the newest commit on the default branch, as the forge names them.' },
+    last_committer_email: { type: 'string', title: 'Last committer email', description: 'The address on that commit, lowercase, as the commit carries it. It may be a personal or made-up address.' },
     last_commit_at: { type: 'datetime' },
     open_prs: { type: 'number', title: 'Open PRs' },
     stale_prs: { type: 'number', title: 'Stale PRs (7d+)' },
@@ -125,7 +126,9 @@ export const SERVICE_BLUEPRINT = {
     last_changed_at: { type: 'datetime', title: 'Last changed', description: "When the newest commit on the default branch touched the service's folder. A repository that holds several services moves each one only when its own folder changes." },
     last_changed_by: { type: 'string', title: 'Last changed by', description: "Who made the newest commit on the default branch that touched the service's folder, as the forge names them. A bot or release tool counts." },
     last_human_changed_at: { type: 'datetime', title: 'Last human change', description: "When the newest commit by a person, not a bot or release tool, touched the service's folder. Empty when none of its recent commits were by a person." },
+    last_changed_by_email: { type: 'string', title: 'Last changed by email', description: 'The address on that commit, lowercase, as the commit carries it. It may be a personal or made-up address.' },
     last_human_changed_by: { type: 'string', title: 'Last human change by', description: 'Who made that commit, as the forge names them.' },
+    last_human_changed_by_email: { type: 'string', title: 'Last human change by email', description: 'The address on that commit, lowercase, as the commit carries it.' },
     type: { type: 'enum', values: ['backend', 'frontend', 'library', 'infrastructure', 'tool', 'docs', 'other'], description: 'What kind of thing it is, read from the files that build it.' },
     language: { type: 'enum', values: [...LANGUAGES], sticky: true, description: 'What the service is written in, read from the files that build it. A repository that holds several services can hold several languages; this is the one for this service. A person who knows better changes it, and that change stays.' },
     has_readme: { type: 'boolean', title: 'Has README', description: "A README in the service's own folder, or in the nearest folder above it that holds no other service. A monorepo's root README documents no single service." },
@@ -195,7 +198,7 @@ export function toServices(repo: RepoSnapshot): ServiceEntity[] {
       key: s.id ? `${key}/${s.id.toLowerCase()}` : key,
       title: s.name,
       ...(icon ? { icon } : {}),
-      fields: { path: s.path, type: s.type, language: s.language, last_changed_at: s.changedAt ?? null, last_changed_by: s.changedBy ?? null, last_human_changed_at: s.humanChangedAt ?? null, last_human_changed_by: s.humanChangedBy ?? null, has_readme: s.files?.readme ?? null, has_dockerfile: s.files?.dockerfile ?? null, has_tests: s.files?.tests ?? null },
+      fields: { path: s.path, type: s.type, language: s.language, last_changed_at: s.changedAt ?? null, last_changed_by: s.changedBy ?? null, last_changed_by_email: s.changedByEmail ?? null, last_human_changed_at: s.humanChangedAt ?? null, last_human_changed_by: s.humanChangedBy ?? null, last_human_changed_by_email: s.humanChangedByEmail ?? null, has_readme: s.files?.readme ?? null, has_dockerfile: s.files?.dockerfile ?? null, has_tests: s.files?.tests ?? null },
       relations: { repository: key },
     }
   })
@@ -269,6 +272,7 @@ export function toRepository(repo: RepoSnapshot, account: Pick<AccountRow, 'logi
       has_readme: repo.facts.hasReadme,
       has_dockerfile: repo.facts.hasDockerfile,
       last_committer: repo.facts.lastCommitter,
+      last_committer_email: repo.facts.lastCommitterEmail ?? null,
       last_commit_at: repo.facts.lastCommitAt,
     })
   }

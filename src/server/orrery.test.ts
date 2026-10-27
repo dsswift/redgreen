@@ -29,7 +29,7 @@ const repo: RepoSnapshot = {
     { number: 2, title: 'new', url: 'u', author: 'a', draft: false, updatedAt: '2026-09-29T00:00:00Z', checks: 'success' },
   ],
   security: { dependabot: { critical: 1, high: 2, url: 'u' }, codeScanning: null },
-  facts: { topics: ['billing'], branchProtected: true, requiresReview: true, requiredApprovals: 2, requiresCodeOwnerReview: false, hasCodeowners: true, hasReadme: true, hasDockerfile: false, lastCommitter: 'dev', lastCommitAt: '2026-09-20T00:00:00Z' },
+  facts: { topics: ['billing'], branchProtected: true, requiresReview: true, requiredApprovals: 2, requiresCodeOwnerReview: false, hasCodeowners: true, hasReadme: true, hasDockerfile: false, lastCommitter: 'dev', lastCommitterEmail: 'dev@example.com', lastCommitAt: '2026-09-20T00:00:00Z' },
   syncedAt: '2026-09-30T00:00:00Z',
 }
 
@@ -40,7 +40,7 @@ describe('toRepository', () => {
     expect(s.blueprint).toBe('repository')
     expect(s.key).toBe('github/example/payments')
     expect(s.title).toBe('Payments')
-    expect(s.fields).toMatchObject({ language: 'Go', organization: 'Example', pipelines_failing: 1, workflow_failure_rate: 33, stale_prs: 1, last_release: 'v1.2.0', dependabot_critical: 1, code_scanning_critical: null, health: 'red', health_reason: 'ci is failing on main', branch_protected: true, required_approvals: 2, has_ci: true })
+    expect(s.fields).toMatchObject({ language: 'Go', organization: 'Example', pipelines_failing: 1, workflow_failure_rate: 33, stale_prs: 1, last_release: 'v1.2.0', dependabot_critical: 1, code_scanning_critical: null, health: 'red', health_reason: 'ci is failing on main', branch_protected: true, required_approvals: 2, has_ci: true, last_committer: 'dev', last_committer_email: 'dev@example.com' })
   })
 
   it('reports grey for quiet and unknown, and omits facts it does not have', () => {
@@ -82,7 +82,7 @@ describe('toServices', () => {
         rules: 1,
         services: [
           { id: '', path: '', name: 'Payments', type: 'backend', language: 'Go' },
-          { id: 'web/Checkout', path: 'web/Checkout', name: 'checkout', type: 'frontend', language: 'TypeScript', changedAt: '2026-10-01T09:00:00Z', changedBy: 'release-damnit', humanChangedAt: '2026-09-30T09:00:00Z', humanChangedBy: 'a-developer' },
+          { id: 'web/Checkout', path: 'web/Checkout', name: 'checkout', type: 'frontend', language: 'TypeScript', changedAt: '2026-10-01T09:00:00Z', changedBy: 'release-damnit', changedByEmail: 'release@example.com', humanChangedAt: '2026-09-30T09:00:00Z', humanChangedBy: 'a-developer', humanChangedByEmail: 'dev@example.com' },
           { id: 'deploy', path: 'deploy', name: 'Payments infrastructure', type: 'infrastructure', language: null },
         ],
       },
@@ -92,7 +92,7 @@ describe('toServices', () => {
       ['github/example/payments/web/checkout', 'typescript'],
       ['github/example/payments/deploy', undefined],
     ])
-    expect(out[1]).toMatchObject({ blueprint: 'service', title: 'checkout', fields: { path: 'web/Checkout', type: 'frontend', language: 'TypeScript', last_changed_at: '2026-10-01T09:00:00Z', last_changed_by: 'release-damnit', last_human_changed_at: '2026-09-30T09:00:00Z', last_human_changed_by: 'a-developer' }, relations: { repository: 'github/example/payments' } })
+    expect(out[1]).toMatchObject({ blueprint: 'service', title: 'checkout', fields: { path: 'web/Checkout', type: 'frontend', language: 'TypeScript', last_changed_at: '2026-10-01T09:00:00Z', last_changed_by: 'release-damnit', last_changed_by_email: 'release@example.com', last_human_changed_at: '2026-09-30T09:00:00Z', last_human_changed_by: 'a-developer', last_human_changed_by_email: 'dev@example.com' }, relations: { repository: 'github/example/payments' } })
     for (const s of out) expect(Object.keys(s.fields).filter((f) => !(f in SERVICE_BLUEPRINT.fields))).toEqual([])
   })
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { SERVICE_RULES, budgeted, detectServices, isBot, lastChangeOf, readServices, serviceFiles, type RepoFiles } from './services.ts'
+import { SERVICE_RULES, budgeted, detectServices, emailOf, isBot, lastChangeOf, readServices, serviceFiles, type RepoFiles } from './services.ts'
 
 /** A repository held in memory: path to contents. A path mapped to '' exists and says nothing. */
 const repo = (files: Record<string, string>) => ({ paths: Object.keys(files), read: async (p: string) => files[p] ?? null })
@@ -176,12 +176,12 @@ describe('reading a repository', () => {
       reads.push(p)
       return 'package main\nfunc main() {}\n'
     },
-    lastChange: async (p) => (p === '' ? { at: `${commit}-at`, by: `${commit}-by`, humanAt: `${commit}-hat`, humanBy: `${commit}-hby` } : null),
+    lastChange: async (p) => (p === '' ? { at: `${commit}-at`, by: `${commit}-by`, email: `${commit}@bot.example`, humanAt: `${commit}-hat`, humanBy: `${commit}-hby`, humanEmail: `${commit}@dev.example` } : null),
   })
 
   it('stamps each service with when and by whom its own folder last changed', async () => {
     const { services } = await readServices(files('a'), 'tool', null)
-    expect(services.services[0]).toMatchObject({ changedAt: 'a-at', changedBy: 'a-by', humanChangedAt: 'a-hat', humanChangedBy: 'a-hby' })
+    expect(services.services[0]).toMatchObject({ changedAt: 'a-at', changedBy: 'a-by', changedByEmail: 'a@bot.example', humanChangedAt: 'a-hat', humanChangedBy: 'a-hby', humanChangedByEmail: 'a@dev.example' })
   })
 
   it('reads again only when the branch moved or the rules changed', async () => {
@@ -209,9 +209,14 @@ describe('lastChangeOf', () => {
     const out = lastChangeOf([
       { at: '3', by: 'release-damnit' },
       { at: '2', by: 'dependabot[bot]' },
-      { at: '1', by: 'a-developer' },
+      { at: '1', by: 'a-developer', email: ' A.Developer@Example.com ' },
     ])
-    expect(out).toEqual({ at: '3', by: 'release-damnit', humanAt: '1', humanBy: 'a-developer' })
+    expect(out).toEqual({ at: '3', by: 'release-damnit', email: null, humanAt: '1', humanBy: 'a-developer', humanEmail: 'a.developer@example.com' })
+  })
+  it('keeps an address only when it is one, lowercase', () => {
+    expect(emailOf('Dev@Example.COM')).toBe('dev@example.com')
+    expect(emailOf('not an address')).toBeNull()
+    expect(emailOf(undefined)).toBeNull()
   })
   it('leaves the human pair empty when every recent commit is a bot, and answers null with no commits', () => {
     expect(lastChangeOf([{ at: '1', by: 'x', email: 'ci[bot]@example.com' }])).toMatchObject({ humanAt: null, humanBy: null })

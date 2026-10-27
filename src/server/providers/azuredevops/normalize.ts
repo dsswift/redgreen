@@ -4,6 +4,7 @@
 import { mainLanguage } from '../../../shared/languages.ts'
 import type { AlertCounts, ChecksState, Pipeline, PipelineState, RepoFacts, RepoSnapshot, Run, RunConclusion, RunStatus, RunTrigger, Schedule } from '../../../shared/model.ts'
 import type { FileSchedules } from './pipeline-file.ts'
+import { emailOf } from '../../services.ts'
 import { WINDOWS_TIME_ZONES } from './timezones.ts'
 
 export interface AdoRepo {
@@ -82,7 +83,7 @@ export interface AdoLanguageMetrics {
 }
 
 export interface AdoCommit {
-  author?: { name?: string; date?: string }
+  author?: { name?: string; email?: string; date?: string }
 }
 
 /** Policy types every organization shares. */
@@ -263,6 +264,7 @@ export function toFacts(policies: AdoPolicy[] | null, rootPaths: string[] | null
     hasReadme: names ? names.some((n) => n.startsWith('readme')) : null,
     hasDockerfile: names ? names.some((n) => n === 'dockerfile' || n.endsWith('.dockerfile')) : null,
     lastCommitter: commit?.author?.name ?? null,
+    lastCommitterEmail: emailOf(commit?.author?.email),
     lastCommitAt: commit?.author?.date ?? null,
   }
 }
