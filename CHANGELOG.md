@@ -55,6 +55,12 @@ All notable changes to this project will be documented in this file. See [standa
 * one language list and open fields ([dafe517](https://github.com/dsswift/redgreen/commit/dafe5174f0f73ab5ec834e686569882f91c35749))
 * push forge deployments to orrery ([185abff](https://github.com/dsswift/redgreen/commit/185abff406076d4b4a343b502ade925caf96625e))
 
+## [0.2.12](https://github.com/dsswift/redgreen/compare/v0.2.11...v0.2.12) (2026-10-27)
+
+### Bug Fixes
+
+* count a .invalid address as a bot ([4c2ba31](https://github.com/dsswift/redgreen/commit/4c2ba31dde0f392bcc70eb8602e9f515ebd745ef))
+
 ## [0.2.11](https://github.com/dsswift/redgreen/compare/v0.2.10...v0.2.11) (2026-10-27)
 
 ### Features
