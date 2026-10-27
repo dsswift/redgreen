@@ -1,6 +1,6 @@
 {
   "name": "redgreen",
-  "version": "0.2.10",
+  "version": "0.2.11",
   "private": true,
   "description": "One board for the health of every repository you own, across every forge.",
   "type": "module",
