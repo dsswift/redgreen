@@ -222,6 +222,13 @@ describe('lastChangeOf', () => {
     expect(lastChangeOf([{ at: '1', by: 'x', email: 'ci[bot]@example.com' }])).toMatchObject({ humanAt: null, humanBy: null })
     expect(lastChangeOf([])).toBeNull()
   })
+  it('counts an address on the .invalid domain as a job, whatever name it signs with', () => {
+    const out = lastChangeOf([
+      { at: '2', by: 'Cloud Operations', email: 'cloud-operations@example.invalid' },
+      { at: '1', by: 'A Developer', email: 'dev@example.com' },
+    ])
+    expect(out).toMatchObject({ by: 'Cloud Operations', humanBy: 'A Developer', humanEmail: 'dev@example.com' })
+  })
   it('takes extra bot names from the list given', () => {
     expect(isBot({ at: '1', by: 'Deploy Robot' }, ['deploy robot'])).toBe(true)
     expect(isBot({ at: '1', by: 'Deploy Robot' }, [])).toBe(false)

@@ -10,7 +10,7 @@ import { languageOfFile, mainLanguage, type Language } from '../shared/languages
 import type { DetectedService, RepoServices, ServiceFiles, ServiceType } from '../shared/model.ts'
 
 /** Bump on any change to the rules below, so every repository is read again instead of trusting its last answer. */
-export const SERVICE_RULES = 6
+export const SERVICE_RULES = 7
 
 /** A commit as a forge names it. Either part is null when the forge left it out. */
 export interface Commit {
@@ -32,7 +32,8 @@ export interface LastChange {
 /** Commits read per folder while looking for the newest one a person made. */
 export const HUMAN_LOOKBACK = 30
 
-const BOT_PATTERN = /\[bot\]|(^|[-_ ])bot$|^bot[-_ ]|release-damnit|github-actions|dependabot|renovate|project_\d+_bot|^gitlab-?ci/i
+/** `.invalid` is a domain that can never be real (RFC 2606), so an address on it is a job signing its own commits. */
+const BOT_PATTERN = /@[^@\s]+\.invalid$|\[bot\]|(^|[-_ ])bot$|^bot[-_ ]|release-damnit|github-actions|dependabot|renovate|project_\d+_bot|^gitlab-?ci/i
 
 /** Whether a commit came from automation: a release tool, a dependency updater, a CI job. `BOT_AUTHORS` adds comma separated names or addresses. */
 export function isBot(commit: Commit, extra: string[] = (process.env.BOT_AUTHORS ?? '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean)): boolean {
