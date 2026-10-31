@@ -1,6 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useEstate, useLiveUpdates, useSweep } from './api.ts'
 import { Board } from './components/Board.tsx'
+import { Outcomes } from './components/Outcomes.tsx'
 import { Quiet } from './components/Quiet.tsx'
 import { RepoDetail } from './components/RepoDetail.tsx'
 import { Settings } from './components/Settings.tsx'
@@ -18,6 +19,7 @@ export function App() {
       <main className="flex-1">
         {route.page === 'board' && <Board />}
         {route.page === 'quiet' && <Quiet />}
+        {route.page === 'outcomes' && <Outcomes />}
         {route.page === 'settings' && <Settings />}
         {route.page === 'repo' && <RepoDetail id={route.id} />}
       </main>
@@ -52,6 +54,7 @@ function TopBar({ route }: { route: Route }) {
       <nav className="flex items-center">
         {nav('board', 'Board', { page: 'board' })}
         {nav('quiet', `Quiet${totals ? ` ${totals.quiet}` : ''}`, { page: 'quiet' })}
+        {nav('outcomes', 'Outcomes', { page: 'outcomes' })}
         {nav('settings', 'Settings', { page: 'settings' })}
       </nav>
       <div className="ml-auto flex items-center gap-4 font-mono text-[11px] text-ink-400">

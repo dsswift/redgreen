@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useEffect } from 'react'
-import type { EstateResponse, RepoDetailResponse, ServerEvent, SettingsResponse } from '../shared/api.ts'
+import type { EstateResponse, OutcomesResponse, RepoDetailResponse, ServerEvent, SettingsResponse } from '../shared/api.ts'
+import type { WindowDays } from '../shared/outcomes.ts'
 import type { Account } from '../shared/model.ts'
 import type { RepoSettings, RuleSeverities } from '../shared/rules.ts'
 import { SIGNED_OUT, signInAgain, signedOut } from './session.ts'
@@ -23,6 +24,7 @@ export const keys = {
   estate: ['estate'] as const,
   repo: (id: string) => ['repo', id] as const,
   settings: ['settings'] as const,
+  outcomes: (window: WindowDays) => ['outcomes', window] as const,
 }
 
 export function useEstate() {
@@ -31,6 +33,10 @@ export function useEstate() {
 
 export function useRepo(id: string) {
   return useQuery({ queryKey: keys.repo(id), queryFn: () => call<RepoDetailResponse>(`/api/repos/${encodeURIComponent(id)}`) })
+}
+
+export function useOutcomes(window: WindowDays) {
+  return useQuery({ queryKey: keys.outcomes(window), queryFn: () => call<OutcomesResponse>(`/api/outcomes?window=${window}`), staleTime: 30_000, placeholderData: (previous) => previous })
 }
 
 export function useSettings() {
@@ -117,6 +123,7 @@ export function useLiveUpdates(client: QueryClient): void {
         invalidateEstate()
       } else if (parsed.type === 'estate') {
         invalidateEstate()
+        void client.invalidateQueries({ queryKey: ['outcomes'] })
         void client.invalidateQueries({ queryKey: keys.settings })
       } else if (parsed.type === 'sync') {
         client.setQueryData<EstateResponse>(keys.estate, (old) => (old ? { ...old, sync: parsed.status } : old))

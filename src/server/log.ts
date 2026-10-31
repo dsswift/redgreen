@@ -1,6 +1,8 @@
 // One JSON object per line on stdout. Every decision that changes an outcome
 // logs both branches, so a missing line is evidence that the path did not run.
 
+import { context, trace } from '@opentelemetry/api'
+
 type Level = 'debug' | 'info' | 'warn' | 'error'
 type Fields = Record<string, unknown>
 
@@ -18,7 +20,8 @@ export interface Logger {
 export function createLogger(component: string, bound: Fields = {}): Logger {
   const write = (level: Level, msg: string, fields?: Fields) => {
     if (LEVELS[level] < threshold) return
-    const line = { ts: new Date().toISOString(), level, component, msg, ...bound, ...fields }
+    const span = trace.getSpan(context.active())?.spanContext()
+    const line = { ts: new Date().toISOString(), level, component, msg, ...(span?.traceId ? { trace_id: span.traceId } : {}), ...bound, ...fields }
     process.stdout.write(JSON.stringify(line, errorReplacer) + '\n')
   }
   return {

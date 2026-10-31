@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import type { Account, ProviderKind, RepoSnapshot } from '../shared/model.ts'
+import type { CarriedCommit, DeploymentRecord } from '../shared/outcomes.ts'
 import { DEFAULT_REPO_SETTINGS, defaultRuleSeverities, type Level, type RepoSettings, type RuleSeverities } from '../shared/rules.ts'
 
 const SCHEMA = `
@@ -50,6 +51,24 @@ CREATE TABLE IF NOT EXISTS http_cache (
   touched_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS http_cache_touched ON http_cache(touched_at);
+CREATE TABLE IF NOT EXISTS deployments (
+  key TEXT PRIMARY KEY,
+  repo_id TEXT NOT NULL,
+  service TEXT NOT NULL,
+  source TEXT NOT NULL,
+  environment TEXT NOT NULL,
+  status TEXT NOT NULL,
+  revision TEXT NOT NULL,
+  revision_elsewhere INTEGER NOT NULL,
+  started_at TEXT,
+  finished_at TEXT NOT NULL,
+  url TEXT,
+  base_revision TEXT,
+  commits TEXT,
+  seen_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS deployments_repo ON deployments(repo_id, finished_at);
+CREATE INDEX IF NOT EXISTS deployments_finished ON deployments(finished_at);
 `
 
 /**
@@ -68,7 +87,7 @@ export const MAX_CACHED_BODY = 256 * 1024
 const CACHE_GENERATION = 1
 
 /** Every table but the cache. A cache reset copies these and nothing else. */
-const KEPT_TABLES = ['settings', 'accounts', 'repos', 'repo_settings', 'level_history']
+const KEPT_TABLES = ['settings', 'accounts', 'repos', 'repo_settings', 'level_history', 'deployments']
 
 /**
  * Starts the cache again empty when the file predates `CACHE_GENERATION`.
@@ -294,6 +313,7 @@ export class Store {
       this.db.prepare('DELETE FROM repos WHERE id = ?').run(id)
       this.db.prepare('DELETE FROM repo_settings WHERE repo_id = ?').run(id)
       this.db.prepare('DELETE FROM level_history WHERE repo_id = ?').run(id)
+      this.db.prepare('DELETE FROM deployments WHERE repo_id = ?').run(id)
     }
     return stale.map((s) => s.id)
   }
@@ -333,6 +353,51 @@ export class Store {
     return this.db
       .prepare('SELECT level, at FROM level_history WHERE repo_id = ? ORDER BY at DESC LIMIT ?')
       .all(repoId, limit) as unknown as LevelChange[]
+  }
+
+  // Deployments ----------------------------------------------------------------
+
+  /** Keeps a deployment. One already kept takes the new facts but keeps the commits it has read; a source never un-reads them. */
+  upsertDeployment(d: DeploymentRecord, now: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO deployments (key, repo_id, service, source, environment, status, revision, revision_elsewhere, started_at, finished_at, url, base_revision, commits, seen_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET
+           repo_id = excluded.repo_id, service = excluded.service, environment = excluded.environment, status = excluded.status,
+           revision = excluded.revision, revision_elsewhere = excluded.revision_elsewhere, started_at = excluded.started_at,
+           finished_at = excluded.finished_at, url = excluded.url, seen_at = excluded.seen_at,
+           base_revision = CASE WHEN deployments.commits IS NULL THEN excluded.base_revision ELSE deployments.base_revision END,
+           commits = COALESCE(deployments.commits, excluded.commits)`,
+      )
+      .run(d.key, d.repoId, d.service, d.source, d.environment, d.status, d.revision, d.revisionElsewhere ? 1 : 0, d.startedAt, d.finishedAt, d.url, d.baseRevision, d.commits ? JSON.stringify(d.commits) : null, now)
+  }
+
+  /** Whether a deployment is already kept. */
+  hasDeployment(key: string): boolean {
+    return !!this.db.prepare('SELECT 1 FROM deployments WHERE key = ?').get(key)
+  }
+
+  /** Every deployment, or one repo's, that finished at or after `since`, oldest first. */
+  listDeployments(repoId: string | null = null, since: string | null = null): DeploymentRecord[] {
+    const rows = this.db
+      .prepare(`SELECT * FROM deployments WHERE (? IS NULL OR repo_id = ?) AND (? IS NULL OR finished_at >= ?) ORDER BY finished_at`)
+      .all(repoId, repoId, since, since) as unknown as DeploymentRecordRow[]
+    return rows.map(toDeployment)
+  }
+
+  /** One repo's deployments whose commits are not read yet, newest first. */
+  deploymentsWithoutCommits(repoId: string, limit: number): DeploymentRecord[] {
+    const rows = this.db.prepare('SELECT * FROM deployments WHERE repo_id = ? AND commits IS NULL ORDER BY finished_at DESC LIMIT ?').all(repoId, limit) as unknown as DeploymentRecordRow[]
+    return rows.map(toDeployment)
+  }
+
+  setDeploymentCommits(key: string, baseRevision: string | null, commits: CarriedCommit[]): void {
+    this.db.prepare('UPDATE deployments SET base_revision = ?, commits = ? WHERE key = ?').run(baseRevision, JSON.stringify(commits), key)
+  }
+
+  pruneDeployments(finishedBefore: string): number {
+    return Number(this.db.prepare('DELETE FROM deployments WHERE finished_at < ?').run(finishedBefore).changes)
   }
 
   // HTTP cache ---------------------------------------------------------------
@@ -416,5 +481,40 @@ function toRepo(row: RepoRecord): RepoRow {
     syncedAt: row.synced_at,
     syncError: row.sync_error,
     seenAt: row.seen_at,
+  }
+}
+
+interface DeploymentRecordRow {
+  key: string
+  repo_id: string
+  service: string
+  source: DeploymentRecord['source']
+  environment: string
+  status: DeploymentRecord['status']
+  revision: string
+  revision_elsewhere: number
+  started_at: string | null
+  finished_at: string
+  url: string | null
+  base_revision: string | null
+  commits: string | null
+  seen_at: string
+}
+
+function toDeployment(row: DeploymentRecordRow): DeploymentRecord {
+  return {
+    key: row.key,
+    repoId: row.repo_id,
+    service: row.service,
+    source: row.source,
+    environment: row.environment,
+    status: row.status,
+    revision: row.revision,
+    revisionElsewhere: row.revision_elsewhere === 1,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
+    url: row.url,
+    baseRevision: row.base_revision,
+    commits: row.commits ? (JSON.parse(row.commits) as CarriedCommit[]) : null,
   }
 }

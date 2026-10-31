@@ -21,7 +21,9 @@ Estate health board. Read `README.md` first.
   the hub is offered: a field written must be defined there. `toDeployments`
   and `DEPLOYMENT_BLUEPRINT` do the same for the deployments a forge records.
   A provider that reads none leaves `deployments` off its snapshot. `toServices`
-  and `SERVICE_BLUEPRINT` do the same for services. It speaks plain HTTP; do
+  and `SERVICE_BLUEPRINT` do the same for services. Both carry the `dora_*`
+  fields of the last 30 days, from `Outcomes.measuresFor`; `dora_grade` is
+  the worst DORA band among the measures with data. It speaks plain HTTP; do
   not add an SDK.
 - `server/services.ts` finds the services in a repo from the files that build
   them. `detectServices` is the only place a service is recognised; a
@@ -31,6 +33,24 @@ Estate health board. Read `README.md` first.
   Bump `SERVICE_RULES` with any change to a rule.
 - Health is computed at read time from stored snapshots in
   `server/health/evaluate.ts`. Changing a rule never needs a resync.
+- Outcomes are the four DORA measures. `shared/outcomes.ts` is the only place
+  they are defined: what makes a deployment a failure, how a restore is
+  timed, the bands, the rollups. It is pure and tested with fixtures. The
+  server keeps deployments in the `deployments` table and computes at read
+  time, like health. `server/outcomes/outcomes.ts` keeps what a forge records
+  and reads the commits each deployment carried through `commitsBetween` on
+  `Provider`, once per deployment, bounded per sync. `server/outcomes/orrery-reader.ts`
+  reads a hub's ArgoCD syncs with `ORRERY_READ_TOKEN`; the catalog's workload
+  `repo` URL, read by `repo-url.ts`, says which repository and folder a sync
+  belongs to. A sync whose revision lives in another repository is marked
+  `revisionElsewhere` and the repository's release tags stand in for it.
+- Incidents have one entry point, `server/outcomes/incidents.ts`. No source
+  exists yet; a source that can say an alert fired on a service registers
+  there and `classify` already takes what it returns.
+- Telemetry is `server/telemetry.ts`: OTLP on when `OTEL_EXPORTER_OTLP_ENDPOINT`
+  is set, no-ops otherwise, so the code that measures never checks. The page
+  runs Faro from `web/telemetry.ts` and posts to `/api/telemetry`. An event
+  is `<thing>.<verb>` with values from a fixed list, like `outcomes.window.pick`.
 - `src/web` is a Vite React app served by the server from `dist/web` in
   production and proxied from the Vite dev server locally. Every request goes
   through `call` in `api.ts`. When an answer says the sign-in has ended,

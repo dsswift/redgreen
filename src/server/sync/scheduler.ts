@@ -4,6 +4,7 @@ import type { Config } from '../config.ts'
 import type { Estate } from '../estate.ts'
 import type { Events } from '../events.ts'
 import type { Logger } from '../log.ts'
+import type { Outcomes } from '../outcomes/outcomes.ts'
 import type { Provider } from '../providers/provider.ts'
 import { READ_BUDGET, readServices } from '../services.ts'
 import type { AccountRow, Store } from '../store.ts'
@@ -30,6 +31,7 @@ export class Scheduler {
   private readonly store: Store
   private readonly estate: Estate
   private readonly events: Events
+  private readonly outcomes: Outcomes
   private readonly config: Config
   private readonly log: Logger
 
@@ -48,11 +50,12 @@ export class Scheduler {
     lastError: null,
   }
 
-  constructor(providers: Provider[], store: Store, estate: Estate, events: Events, config: Config, log: Logger) {
+  constructor(providers: Provider[], store: Store, estate: Estate, events: Events, outcomes: Outcomes, config: Config, log: Logger) {
     this.providers = providers
     this.store = store
     this.estate = estate
     this.events = events
+    this.outcomes = outcomes
     this.config = config
     this.log = log
   }
@@ -125,6 +128,8 @@ export class Scheduler {
       }
       const pruned = this.store.pruneCache(new Date(Date.now() - CACHE_TTL_DAYS * 86_400_000).toISOString())
       if (pruned > 0) this.log.info('pruned http cache', { entries: pruned })
+      const dropped = this.outcomes.prune()
+      if (dropped > 0) this.log.info('pruned old deployments', { entries: dropped })
     } catch (error) {
       this.status = { ...this.status, lastError: String(error instanceof Error ? error.message : error) }
       this.log.error('sweep failed', { reason, error })
@@ -211,6 +216,7 @@ export class Scheduler {
       this.store.saveSnapshot(snapshot)
       const level = this.estate.reconcileLevel({ ...row, snapshot, syncedAt: snapshot.syncedAt, syncError: null })
       this.log.info('repo synced', { repo: snapshot.fullName, reason: job.reason, health: level, ms: Date.now() - started })
+      await this.outcomes.ingestRepo(row, snapshot, account)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       this.store.saveSyncError(row.id, message)

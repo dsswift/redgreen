@@ -2,6 +2,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto'
 import type { GitlabSetup } from '../../../shared/api.ts'
 import type { RepoSnapshot } from '../../../shared/model.ts'
 import type { Config } from '../../config.ts'
+import type { CarriedCommit } from '../../../shared/outcomes.ts'
 import type { Logger } from '../../log.ts'
 import type { SecretBox } from '../../secrets.ts'
 import type { AccountRow, DiscoveredRepo, Store } from '../../store.ts'
@@ -12,6 +13,7 @@ import { RateLimits } from '../rate-limits.ts'
 import { GitlabClient, encodePath, type AuthHeaders } from './client.ts'
 import type { GlGroup, GlProject, GlUser } from './normalize.ts'
 import { authorizeUrl, exchangeCode, newState, refresh, type TokenSet } from './oauth.ts'
+import { gitlabCommitsBetween } from './commits.ts'
 import { gitlabFiles } from './files.ts'
 import { syncGitlabRepo } from './repo-sync.ts'
 
@@ -196,6 +198,10 @@ export class GitlabProvider implements Provider {
 
   async files(_account: AccountRow, snapshot: RepoSnapshot): Promise<RepoFiles | null> {
     return gitlabFiles(this.client(), numericId(snapshot.id), snapshot.defaultBranch)
+  }
+
+  async commitsBetween(_account: AccountRow, repo: Pick<RepoSnapshot, 'id' | 'fullName'>, base: string | null, head: string): Promise<CarriedCommit[] | null> {
+    return gitlabCommitsBetween(this.client(), numericId(repo.id), base, head, this.log)
   }
 
   // Webhooks --------------------------------------------------------------------

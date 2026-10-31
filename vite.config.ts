@@ -1,11 +1,15 @@
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vitest/config'
+import pkg from './package.json' with { type: 'json' }
 
 export default defineConfig({
   root: 'src/web',
   publicDir: 'public',
   plugins: [react(), tailwindcss()],
+  define: { __APP_VERSION__: JSON.stringify(pkg.version) },
+  // Two copies of the OpenTelemetry API and a fetch never becomes a span.
+  resolve: { dedupe: ['@opentelemetry/api'] },
   build: {
     outDir: '../../dist/web',
     emptyOutDir: true,

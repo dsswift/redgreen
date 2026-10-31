@@ -19,6 +19,14 @@ const schema = z.object({
   ORRERY_URL: z.string().url().optional(),
   /** A source token for the hub. */
   ORRERY_TOKEN: z.string().optional(),
+  /** An access token for the hub, which may read. With ORRERY_URL, the ArgoCD syncs the hub holds are read as deployments for Outcomes. A source token may not read. */
+  ORRERY_READ_TOKEN: z.string().optional(),
+  /** Where traces and metrics go over OTLP/HTTP. Unset, telemetry is off. */
+  OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
+  OTEL_SERVICE_NAME: z.string().optional(),
+  /** Where browser telemetry is relayed to, and the key it needs. Without the key the page's batches are accepted and dropped. */
+  FARO_URL: z.string().url().optional(),
+  FARO_API_KEY: z.string().optional(),
   /** Base64 32-byte key that encrypts provider credentials at rest. Generated into DATA_DIR when unset. */
   SECRET_KEY: z.string().optional(),
 

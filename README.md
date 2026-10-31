@@ -23,6 +23,22 @@ or off. Any repo can override a rule, mute a single pipeline, or mute itself.
 It also shows counts and simple metrics: open issues and pull requests, stars,
 last push, latest releases, success rate, and how long a repo has been red.
 
+## Outcomes
+
+`/outcomes` shows the four DORA measures for the estate and for every service
+that deploys, over 7, 30, or 90 days, each set against the window before it.
+
+| Measure | How it is counted today | What it still lacks |
+| --- | --- | --- |
+| Deployment frequency | Successful deployments per day. A deployment is one GitHub or GitLab recorded against an environment, or an ArgoCD sync Orrery holds (`ORRERY_READ_TOKEN`). Azure DevOps records none. | Deployments from any other tool |
+| Lead time for changes | Median and p90 of the hours from a commit's authoring to the end of the deployment that carried it. The commits carried are those between the previous successful deployment's revision and this one's, read once through the forge's compare endpoint and kept. Where the sync's revision is a manifest in another repository, the service's own release tags stand in. | Commits on Azure DevOps; a path filter for a monorepo service |
+| Change failure rate | The share of deployments that failed, or were followed within a day by a deployment carrying only `fix` or `revert` commits. | An incident source: an alert that fired on the service |
+| Time to restore | Median hours from a failed deployment to the next successful one, or from an incident opening to its end. | The same incident source |
+
+Each measure has a DORA band, elite to low, and a service's grade is the worst
+of its bands. Deployments are kept for 200 days and the numbers are computed
+when the page is read, so a change to a rule never needs a resync.
+
 ## Providers
 
 GitHub, GitLab, and Azure DevOps are the providers today. The estate model is
@@ -101,7 +117,10 @@ Configuration is by environment variable:
 | `SECRET_KEY` | generated | Base64 32-byte key that encrypts provider credentials at rest |
 | `SYNC_INTERVAL_MINUTES` | `5` | Minutes between full sweeps |
 | `SYNC_CONCURRENCY` | `4` | Repos synced at once |
-| `ORRERY_URL`, `ORRERY_TOKEN` | | An Orrery hub's ingest URL and a source token. When both are set, every repo is pushed there as a `repository` entity, with its main language picked from one fixed list: language, branch protection, last push, pipeline health, alert counts, and a link back to its page here. Every service found in a repo is pushed as a `service` entity homed in it: each app, API, job, command-line tool, library, or infrastructure root, found from the files that build it, with its folder, its kind, its own language and icon, who last changed it and who last changed it by hand, each with the name and the address on the commit so the hub can link the change to a person, and whether it has its own README, Dockerfile, and tests, so a monorepo shows each service as documented, containerized, and tested on its own. Every finished deployment GitHub or GitLab recorded against an environment is pushed as a `deployment` entity, so the hub can count deployments per week and how many failed. The blueprints are offered to the hub first, so the source must be registered for `repository`, for `service` to have services pushed, and for `deployment` to have deployments pushed |
+| `ORRERY_READ_TOKEN` | | An access token for the same hub, which may read where a source token may not. With it, every ArgoCD sync the hub holds as a `deployment` is read for Outcomes and kept against the repository the synced workload's catalog entry names, with the folder when that entry points into a monorepo |
+| `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME` | | Where traces and metrics go over OTLP/HTTP, and the service name (`redgreen`). Unset, telemetry is off. The server sends `redgreen.build_info`, `http.server.request.duration`, a `redgreen.outcomes.compute` span with its duration, and `redgreen.outcomes.deployments_ingested` by source and outcome |
+| `FARO_URL`, `FARO_API_KEY` | | Where the page's telemetry is relayed. The page posts to `/api/telemetry`; the server caps a batch at 256 KB, names the app `redgreen-web`, strips any user, and relays with the key. Without the key batches are accepted and dropped |
+| `ORRERY_URL`, `ORRERY_TOKEN` | | An Orrery hub's ingest URL and a source token. When both are set, every repo is pushed there as a `repository` entity, with its main language picked from one fixed list: language, branch protection, last push, pipeline health, alert counts, and a link back to its page here. Every service found in a repo is pushed as a `service` entity homed in it: each app, API, job, command-line tool, library, or infrastructure root, found from the files that build it, with its folder, its kind, its own language and icon, who last changed it and who last changed it by hand, each with the name and the address on the commit so the hub can link the change to a person, and whether it has its own README, Dockerfile, and tests, so a monorepo shows each service as documented, containerized, and tested on its own. Repositories and services also carry their last 30 days of Outcomes as `dora_deploy_frequency_30d` (per day), `dora_lead_time_p50_hours`, `dora_change_failure_rate_30d` (%), `dora_time_to_restore_p50_hours`, and `dora_grade` (elite, high, medium, low). Every finished deployment GitHub or GitLab recorded against an environment is pushed as a `deployment` entity, so the hub can count deployments per week and how many failed. The blueprints are offered to the hub first, so the source must be registered for `repository`, for `service` to have services pushed, and for `deployment` to have deployments pushed |
 | `BOT_AUTHORS` | | Extra commit author names or emails, comma separated, to treat as bots when finding a service's last human change. Names ending in `[bot]`, addresses on the `.invalid` domain, and common release and dependency tools are already skipped. |
 | `GITHUB_ALLOWED_ACCOUNTS` | | Logins that sync without approval |
 | `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_APP_WEBHOOK_SECRET`, `GITHUB_APP_SLUG` | | App credentials from the environment, instead of the setup flow |
@@ -116,7 +135,8 @@ Configuration is by environment variable:
 
 There is no login of its own. Put it behind your own gate (oauth2-proxy, a VPN,
 a LAN) and leave `POST /api/webhooks/github`, `POST /api/webhooks/gitlab`, and
-`GET /healthz` open.
+`GET /healthz` open. `POST /api/telemetry` is called by the page, so it sits
+behind the gate with it.
 
 When a sign-in ends while a page is open, the page reloads itself and the gate
 signs the person in again, back where they were. The web app reads that from a
@@ -139,7 +159,7 @@ One replica, one volume; the database is SQLite.
 ## Layout
 
 ```
-src/shared     estate model, rules, wire types (server and web)
+src/shared     estate model, rules, outcomes, wire types (server and web)
 src/server     Hono API, SQLite store, sync scheduler, providers
 src/web        React board
 ```

@@ -1,6 +1,7 @@
 import { App, Octokit } from 'octokit'
 import type { RepoSnapshot } from '../../../shared/model.ts'
 import type { Config } from '../../config.ts'
+import type { CarriedCommit } from '../../../shared/outcomes.ts'
 import type { Logger } from '../../log.ts'
 import type { SecretBox } from '../../secrets.ts'
 import type { AccountRow, DiscoveredRepo, Store } from '../../store.ts'
@@ -9,6 +10,7 @@ import type { DiscoveredAccount, Provider, ProviderStatus, WebhookOutcome } from
 import { RateLimits } from '../rate-limits.ts'
 import { withConditionalRequests } from './client.ts'
 import type { GhRepo } from './normalize.ts'
+import { githubCommitsBetween } from './commits.ts'
 import { githubFiles } from './files.ts'
 import { syncGithubRepo } from './repo-sync.ts'
 
@@ -231,6 +233,10 @@ export class GithubProvider implements Provider {
 
   async files(account: AccountRow, snapshot: RepoSnapshot): Promise<RepoFiles | null> {
     return githubFiles(await this.clientFor(account), snapshot.fullName, snapshot.defaultBranch, this.log)
+  }
+
+  async commitsBetween(account: AccountRow, repo: Pick<RepoSnapshot, 'id' | 'fullName'>, base: string | null, head: string): Promise<CarriedCommit[] | null> {
+    return githubCommitsBetween(await this.clientFor(account), repo.fullName, base, head, this.log)
   }
 
   // Webhooks --------------------------------------------------------------------

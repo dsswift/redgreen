@@ -55,6 +55,17 @@ describe('toRepository', () => {
     const s = toRepository(repo, { login: 'Example' }, null, 'b')
     expect(Object.keys(s.fields).filter((f) => !(f in REPOSITORY_BLUEPRINT.fields))).toEqual([])
   })
+
+  it('writes the DORA measures of the last 30 days, rounded, and empties them where nothing deployed', () => {
+    const measures = { deployments: 4, frequencyPerDay: 0.13333, leadTimeP50Hours: 5.26, leadTimeP90Hours: 9, changeFailureRate: 0.25, timeToRestoreP50Hours: null, grade: 'low' as const }
+    const s = toRepository(repo, { login: 'Example' }, null, 'b', Date.now(), { repo: measures, services: new Map() })
+    expect(s.fields).toMatchObject({ dora_deploy_frequency_30d: 0.133, dora_lead_time_p50_hours: 5.3, dora_change_failure_rate_30d: 25, dora_time_to_restore_p50_hours: null, dora_grade: 'low' })
+    expect(Object.keys(s.fields).filter((f) => !(f in REPOSITORY_BLUEPRINT.fields))).toEqual([])
+    const empty = toRepository(repo, { login: 'Example' }, null, 'b', Date.now(), { repo: { ...measures, deployments: 0, grade: null }, services: new Map() })
+    expect(empty.fields.dora_deploy_frequency_30d).toBeNull()
+    expect(empty.fields.dora_grade).toBeNull()
+    expect(toRepository(repo, { login: 'Example' }, null, 'b').fields.dora_grade).toBeNull()
+  })
 })
 
 describe('toDeployments', () => {
@@ -93,6 +104,14 @@ describe('toServices', () => {
       ['github/example/payments/deploy', undefined],
     ])
     expect(out[1]).toMatchObject({ blueprint: 'service', title: 'checkout', fields: { path: 'web/Checkout', type: 'frontend', language: 'TypeScript', last_changed_at: '2026-10-01T09:00:00Z', last_changed_by: 'release-damnit', last_changed_by_email: 'release@example.com', last_human_changed_at: '2026-09-30T09:00:00Z', last_human_changed_by: 'a-developer', last_human_changed_by_email: 'dev@example.com' }, relations: { repository: 'github/example/payments' } })
+    for (const s of out) expect(Object.keys(s.fields).filter((f) => !(f in SERVICE_BLUEPRINT.fields))).toEqual([])
+  })
+
+  it('writes each service its own DORA measures by folder', () => {
+    const measures = { deployments: 2, frequencyPerDay: 1, leadTimeP50Hours: 2, leadTimeP90Hours: 3, changeFailureRate: 0, timeToRestoreP50Hours: 0.5, grade: 'elite' as const }
+    const out = toServices({ ...repo, services: { commit: 'c', rules: 1, services: [{ id: '', path: '', name: 'root', type: 'backend', language: null }, { id: 'api', path: 'api', name: 'api', type: 'backend', language: null }] } }, { repo: measures, services: new Map([['api', measures]]) })
+    expect(out[0]!.fields.dora_grade).toBeNull()
+    expect(out[1]!.fields).toMatchObject({ dora_deploy_frequency_30d: 1, dora_grade: 'elite', dora_time_to_restore_p50_hours: 0.5 })
     for (const s of out) expect(Object.keys(s.fields).filter((f) => !(f in SERVICE_BLUEPRINT.fields))).toEqual([])
   })
 

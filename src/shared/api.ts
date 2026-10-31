@@ -1,6 +1,7 @@
 // Wire types between the server and the web app.
 
 import type { Account, ProviderKind, Release, RepoSnapshot } from './model.ts'
+import type { OutcomeRow, OutcomesSummary, WindowDays } from './outcomes.ts'
 import type { Level, QuietReason, RepoHealth, RepoSettings, RuleSeverities, Signal } from './rules.ts'
 
 export interface RateLimit {
@@ -135,6 +136,16 @@ export interface SettingsResponse {
     gitlab: GitlabSetup
     azuredevops: AzureDevopsSetup
   }
+}
+
+/** The Outcomes page: the estate's four measures and one row per repository and service. */
+export interface OutcomesResponse {
+  generatedAt: string
+  window: WindowDays
+  estate: OutcomesSummary
+  rows: OutcomeRow[]
+  /** Where deployments are read from, and whether each is on. */
+  sources: { forge: true; orrery: boolean; incidents: boolean }
 }
 
 export type ServerEvent =

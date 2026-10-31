@@ -57,3 +57,30 @@ describe('cache reset', () => {
     expect(new Store(path).cacheReset).toBe(false)
   })
 })
+
+describe('deployments', () => {
+  const record = { key: 'r/forge/1', repoId: 'r', service: '', source: 'forge' as const, environment: 'production', status: 'succeeded' as const, revision: 'abc', revisionElsewhere: false, startedAt: null, finishedAt: '2026-10-20T00:00:00Z', url: null, baseRevision: null, commits: null }
+
+  it('keeps a deployment and never un-reads its commits', () => {
+    const store = new Store(':memory:')
+    store.upsertDeployment(record, NOW)
+    expect(store.hasDeployment('r/forge/1')).toBe(true)
+    expect(store.deploymentsWithoutCommits('r', 10)).toHaveLength(1)
+    store.setDeploymentCommits('r/forge/1', null, [{ sha: 'abc', authoredAt: '2026-10-19T00:00:00Z', title: 'feat: x' }])
+    store.upsertDeployment({ ...record, status: 'failed' }, NOW)
+    const [kept] = store.listDeployments('r')
+    expect(kept).toMatchObject({ status: 'failed', commits: [{ sha: 'abc' }] })
+    expect(store.deploymentsWithoutCommits('r', 10)).toEqual([])
+  })
+
+  it('lists since a time, prunes by age, and goes with its repo', () => {
+    const store = new Store(':memory:')
+    store.upsertDeployment(record, NOW)
+    store.upsertDeployment({ ...record, key: 'r/forge/0', finishedAt: '2026-01-01T00:00:00Z' }, NOW)
+    expect(store.listDeployments(null, '2026-06-01T00:00:00Z').map((d) => d.key)).toEqual(['r/forge/1'])
+    expect(store.pruneDeployments('2026-06-01T00:00:00Z')).toBe(1)
+    store.upsertDiscoveredRepo({ id: 'r', provider: 'github', accountId: 'a', fullName: 'x/y' }, '2026-10-01T00:00:00Z')
+    store.pruneRepos('a', NOW)
+    expect(store.listDeployments('r')).toEqual([])
+  })
+})

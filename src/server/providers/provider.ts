@@ -1,5 +1,6 @@
 import type { ProviderStatus } from '../../shared/api.ts'
 import type { ProviderKind, RepoSnapshot } from '../../shared/model.ts'
+import type { CarriedCommit } from '../../shared/outcomes.ts'
 import type { RepoFiles } from '../services.ts'
 import type { AccountRow, Connection, DiscoveredRepo } from '../store.ts'
 
@@ -36,6 +37,11 @@ export interface Provider {
   syncRepo(account: AccountRow, repoId: string, fullName: string): Promise<RepoSnapshot>
   /** The repository's files at the head of its default branch, or null when it has no commits there. */
   files(account: AccountRow, snapshot: RepoSnapshot): Promise<RepoFiles | null>
+  /**
+   * The commits after `base` up to and including `head`, oldest first, or `head` alone when `base` is null.
+   * Both are commits or tags. Null when the forge cannot say: a commit it no longer has, or no compare at all.
+   */
+  commitsBetween(account: AccountRow, repo: Pick<RepoSnapshot, 'id' | 'fullName'>, base: string | null, head: string): Promise<CarriedCommit[] | null>
   /** Verifies and interprets a webhook delivery. Absent for providers that only poll. */
   handleWebhook?(headers: Headers, body: string): Promise<WebhookOutcome>
 }

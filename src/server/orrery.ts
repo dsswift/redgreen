@@ -9,11 +9,13 @@
 
 import { LANGUAGES, listedLanguage, type Language } from '../shared/languages.ts'
 import type { RepoSnapshot } from '../shared/model.ts'
+import { BANDS, type Measures } from '../shared/outcomes.ts'
 import type { Level, RepoHealth } from '../shared/rules.ts'
 import type { Config } from './config.ts'
 import type { Estate } from './estate.ts'
 import type { Events } from './events.ts'
 import type { Logger } from './log.ts'
+import type { Outcomes } from './outcomes/outcomes.ts'
 import type { AccountRow, Store } from './store.ts'
 
 export interface RepositoryEntity {
@@ -41,6 +43,38 @@ export interface DeploymentEntity {
 }
 
 const LEVELS = ['red', 'amber', 'green', 'grey']
+
+/**
+ * The four DORA measures over the last 30 days, as this board computes them
+ * from the deployments it keeps and the commits each carried, and the band
+ * they land in together. Written on a repository for the whole of it and on
+ * a service for its own deployments. Empty where nothing deployed.
+ */
+const DORA_FIELDS = {
+  dora_deploy_frequency_30d: { type: 'number', title: 'Deploys per day (30d)', description: 'Successful deployments per day over the last 30 days.' },
+  dora_lead_time_p50_hours: { type: 'number', title: 'Lead time p50 (h)', description: 'Median hours from a commit being written to the end of the deployment that carried it, over the last 30 days.' },
+  dora_change_failure_rate_30d: { type: 'number', title: 'Change failure rate (%)', description: 'The share of the last 30 days\' deployments that failed, or were followed within a day by a deployment of only fixes or reverts.' },
+  dora_time_to_restore_p50_hours: { type: 'number', title: 'Time to restore p50 (h)', description: 'Median hours from a failed deployment to the next successful one, over the last 30 days.' },
+  dora_grade: { type: 'enum', values: [...BANDS], title: 'DORA grade', description: 'The worst of the four measures\' DORA bands: elite, high, medium, or low. Empty where nothing deployed in 30 days.' },
+}
+
+/** The DORA fields as written, from measures. Everything null where nothing deployed. */
+function doraFields(m: Measures | null): Record<string, unknown> {
+  const hours = (h: number | null) => (h === null ? null : Math.round(h * 10) / 10)
+  return {
+    dora_deploy_frequency_30d: m && m.deployments > 0 ? Math.round(m.frequencyPerDay * 1000) / 1000 : null,
+    dora_lead_time_p50_hours: hours(m?.leadTimeP50Hours ?? null),
+    dora_change_failure_rate_30d: m?.changeFailureRate === null || m?.changeFailureRate === undefined ? null : Math.round(m.changeFailureRate * 100),
+    dora_time_to_restore_p50_hours: hours(m?.timeToRestoreP50Hours ?? null),
+    dora_grade: m?.grade ?? null,
+  }
+}
+
+/** The 30 day measures of one repository, whole and per service folder. */
+export interface RepoMeasures {
+  repo: Measures
+  services: Map<string, Measures>
+}
 const SUCCEEDED = { field: 'status', op: 'eq', value: 'succeeded' }
 const FAILED = { field: 'status', op: 'eq', value: 'failed' }
 
@@ -96,6 +130,7 @@ export const REPOSITORY_BLUEPRINT = {
     health_reason: { type: 'string' },
     board: { type: 'url', title: 'Repo health board' },
     notes: { type: 'markdown' },
+    ...DORA_FIELDS,
   },
   relations: {},
 }
@@ -134,6 +169,7 @@ export const SERVICE_BLUEPRINT = {
     has_readme: { type: 'boolean', title: 'Has README', description: "A README in the service's own folder, or in the nearest folder above it that holds no other service. A monorepo's root README documents no single service." },
     has_dockerfile: { type: 'boolean', title: 'Has Dockerfile', description: 'A Dockerfile that builds this service, found the same way as its README. Two services in one repository can differ.' },
     has_tests: { type: 'boolean', title: 'Has tests', description: 'Automated tests that belong to this service: test files in its folder, or a test project beside it named for it, such as Tests.Orders.Api.' },
+    ...DORA_FIELDS,
   },
   relations: {
     repository: { target: 'repository', many: false, title: 'Homed in', inverseTitle: 'Services' },
@@ -189,7 +225,7 @@ export const DEPLOYMENT_BLUEPRINT = {
 const repositoryKey = (repo: Pick<RepoSnapshot, 'provider' | 'fullName'>) => `${repo.provider}/${repo.fullName}`.toLowerCase()
 
 /** Every service found in a repo, pointing at its repository. Empty when the services could not be read. Pure, so it is tested without a hub. */
-export function toServices(repo: RepoSnapshot): ServiceEntity[] {
+export function toServices(repo: RepoSnapshot, measures: RepoMeasures | null = null): ServiceEntity[] {
   const key = repositoryKey(repo)
   return (repo.services?.services ?? []).map((s) => {
     const icon = s.language ? LANGUAGE_ICONS[s.language] : undefined
@@ -198,7 +234,7 @@ export function toServices(repo: RepoSnapshot): ServiceEntity[] {
       key: s.id ? `${key}/${s.id.toLowerCase()}` : key,
       title: s.name,
       ...(icon ? { icon } : {}),
-      fields: { path: s.path, type: s.type, language: s.language, last_changed_at: s.changedAt ?? null, last_changed_by: s.changedBy ?? null, last_changed_by_email: s.changedByEmail ?? null, last_human_changed_at: s.humanChangedAt ?? null, last_human_changed_by: s.humanChangedBy ?? null, last_human_changed_by_email: s.humanChangedByEmail ?? null, has_readme: s.files?.readme ?? null, has_dockerfile: s.files?.dockerfile ?? null, has_tests: s.files?.tests ?? null },
+      fields: { path: s.path, type: s.type, language: s.language, last_changed_at: s.changedAt ?? null, last_changed_by: s.changedBy ?? null, last_changed_by_email: s.changedByEmail ?? null, last_human_changed_at: s.humanChangedAt ?? null, last_human_changed_by: s.humanChangedBy ?? null, last_human_changed_by_email: s.humanChangedByEmail ?? null, has_readme: s.files?.readme ?? null, has_dockerfile: s.files?.dockerfile ?? null, has_tests: s.files?.tests ?? null, ...doraFields(measures?.services.get(s.path) ?? null) },
       relations: { repository: key },
     }
   })
@@ -222,7 +258,7 @@ const LEVEL: Record<Level, string> = { red: 'red', amber: 'amber', green: 'green
 const STALE_PR_MS = 7 * 86_400_000
 
 /** Shapes one repo. Pure, so it is tested without a hub. */
-export function toRepository(repo: RepoSnapshot, account: Pick<AccountRow, 'login'>, health: RepoHealth | null, boardUrl: string, now = Date.now()): RepositoryEntity {
+export function toRepository(repo: RepoSnapshot, account: Pick<AccountRow, 'login'>, health: RepoHealth | null, boardUrl: string, now = Date.now(), measures: RepoMeasures | null = null): RepositoryEntity {
   const decisive = repo.pipelines.flatMap((p) => p.runs).filter((r) => r.status === 'completed' && r.conclusion !== 'cancelled' && r.conclusion !== 'skipped' && r.ref === repo.defaultBranch)
   const failed = decisive.filter((r) => r.conclusion !== 'success' && r.conclusion !== 'neutral').length
   const failing = repo.pipelines.filter((p) => {
@@ -260,6 +296,7 @@ export function toRepository(repo: RepoSnapshot, account: Pick<AccountRow, 'logi
     health: LEVEL[health?.level ?? 'unknown'],
     health_reason: health?.level === 'quiet' ? (health.quietReason ?? 'quiet') : (worst?.title ?? null),
     board: boardUrl,
+    ...doraFields(measures?.repo ?? null),
   }
   if (repo.facts) {
     Object.assign(fields, {
@@ -286,6 +323,7 @@ export class OrreryPusher {
   private readonly store: Store
   private readonly estate: Estate
   private readonly events: Events
+  private readonly outcomes: Outcomes
   private readonly log: Logger
   private offered = false
   /** False when the hub refused the deployment blueprint: the source is not registered for it. */
@@ -295,13 +333,14 @@ export class OrreryPusher {
   private timer: NodeJS.Timeout | null = null
   private unsubscribe: (() => void) | null = null
 
-  constructor(config: Config, store: Store, estate: Estate, events: Events, log: Logger) {
+  constructor(config: Config, store: Store, estate: Estate, events: Events, outcomes: Outcomes, log: Logger) {
     this.url = (config.ORRERY_URL ?? '').replace(/\/$/, '')
     this.token = config.ORRERY_TOKEN ?? ''
     this.config = config
     this.store = store
     this.estate = estate
     this.events = events
+    this.outcomes = outcomes
     this.log = log
   }
 
@@ -376,11 +415,12 @@ export class OrreryPusher {
     const account = row && this.store.getAccount(row.accountId)
     if (!row?.snapshot || !account || account.status !== 'active') return
     if (!(await this.offer())) return
-    const entity = toRepository(row.snapshot, account, this.estate.healthOf(row), this.boardUrl(row.id))
+    const measures = this.outcomes.measuresFor(row.id)
+    const entity = toRepository(row.snapshot, account, this.estate.healthOf(row), this.boardUrl(row.id), Date.now(), measures)
     try {
       const scope = `${account.provider}/${account.login}`.toLowerCase()
       await this.call('PATCH', `/ingest/entities/repository/${encodeURIComponent(entity.key)}`, { title: entity.title, fields: entity.fields, scope })
-      const services = this.services ? toServices(row.snapshot) : []
+      const services = this.services ? toServices(row.snapshot, measures) : []
       for (const s of services) await this.call('PATCH', `/ingest/entities/service/${encodeURIComponent(s.key)}`, { title: s.title, ...(s.icon ? { icon: s.icon } : {}), fields: s.fields, relations: s.relations, scope: `${scope}/services` })
       this.log.debug('orrery repo pushed', { repo: row.fullName, services: services.length })
     } catch (error) {
@@ -400,10 +440,11 @@ export class OrreryPusher {
       const mode = synced.length === mine.length ? 'snapshot' : 'incremental'
       const scope = `${account.provider}/${account.login}`.toLowerCase()
       try {
-        const entities = synced.map((r) => toRepository(r.snapshot!, account, this.estate.healthOf(r), this.boardUrl(r.id)))
+        const measures = new Map(synced.map((r) => [r.id, this.outcomes.measuresFor(r.id)]))
+        const entities = synced.map((r) => toRepository(r.snapshot!, account, this.estate.healthOf(r), this.boardUrl(r.id), Date.now(), measures.get(r.id) ?? null))
         const rejected = await this.run(mode, scope, entities, 'repository')
         this.log.info('orrery push done', { reason, account: account.login, mode, repositories: entities.length, unsynced: mine.length - synced.length, rejected })
-        await this.pushServices(account.login, scope, mode, synced.map((r) => r.snapshot!))
+        await this.pushServices(account.login, scope, mode, synced.map((r) => [r.snapshot!, measures.get(r.id) ?? null]))
         await this.pushDeployments(account.login, scope, synced.flatMap((r) => toDeployments(r.snapshot!)))
       } catch (error) {
         this.log.error('orrery push failed', { reason, account: account.login, error })
@@ -427,15 +468,15 @@ export class OrreryPusher {
   }
 
   /** A snapshot only when every repo's services were read, so a service is never dropped because its repo could not be. */
-  private async pushServices(account: string, scope: string, repoMode: 'snapshot' | 'incremental', snapshots: RepoSnapshot[]): Promise<void> {
+  private async pushServices(account: string, scope: string, repoMode: 'snapshot' | 'incremental', snapshots: [RepoSnapshot, RepoMeasures | null][]): Promise<void> {
     if (!this.services) {
       this.log.debug('no services pushed; the hub refused the blueprint', { account })
       return
     }
-    const unread = snapshots.filter((s) => !s.services).length
+    const unread = snapshots.filter(([s]) => !s.services).length
     const mode = repoMode === 'snapshot' && unread === 0 ? 'snapshot' : 'incremental'
     if (mode === 'incremental') this.log.info('services pushed without deleting; some repos are unread', { account, unread })
-    const entities = snapshots.flatMap(toServices)
+    const entities = snapshots.flatMap(([s, m]) => toServices(s, m))
     const rejected = await this.run(mode, `${scope}/services`, entities, 'service')
     this.log.info('orrery services pushed', { account, mode, services: entities.length, rejected })
   }

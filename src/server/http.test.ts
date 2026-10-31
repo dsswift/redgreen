@@ -7,12 +7,14 @@ import { Estate } from './estate.ts'
 import { Events } from './events.ts'
 import { createApp } from './http.ts'
 import { createLogger } from './log.ts'
+import { Outcomes } from './outcomes/outcomes.ts'
 import { AzureDevopsProvider } from './providers/azuredevops/provider.ts'
 import { GithubProvider } from './providers/github/provider.ts'
 import { GitlabProvider } from './providers/gitlab/provider.ts'
 import { SecretBox } from './secrets.ts'
 import { Store } from './store.ts'
 import { Scheduler } from './sync/scheduler.ts'
+import { createTelemetry } from './telemetry.ts'
 
 function app() {
   const webDir = mkdtempSync(join(tmpdir(), 'redgreen-web-'))
@@ -31,8 +33,10 @@ function app() {
   const providers = [github, gitlab, azuredevops]
   const estate = new Estate(store, providers)
   const events = new Events()
-  const scheduler = new Scheduler(providers, store, estate, events, config, log)
-  return createApp({ config, store, estate, scheduler, events, providers, github, gitlab, azuredevops, log, webDir })
+  const telemetry = createTelemetry(config, '0.0.0', log)
+  const outcomes = new Outcomes(store, providers, telemetry, log)
+  const scheduler = new Scheduler(providers, store, estate, events, outcomes, config, log)
+  return createApp({ config, store, estate, scheduler, events, providers, outcomes, telemetry, github, gitlab, azuredevops, log, webDir })
 }
 
 describe('http', () => {
@@ -46,6 +50,21 @@ describe('http', () => {
       expect(response.headers.get('cache-control')).toMatch(/\bprivate\b/)
     },
   )
+
+  it('answers outcomes for a known window and refuses another', async () => {
+    const ok = await app().request('/api/outcomes?window=7')
+    expect(ok.status).toBe(200)
+    expect(await ok.json()).toMatchObject({ window: 7, rows: [], sources: { forge: true, orrery: false, incidents: false } })
+    expect((await app().request('/api/outcomes?window=14')).status).toBe(400)
+    expect(((await (await app().request('/api/outcomes')).json()) as { window: number }).window).toBe(30)
+  })
+
+  it('accepts and drops a browser telemetry batch without a relay, and refuses one too large', async () => {
+    const dropped = await app().request('/api/telemetry', { method: 'POST', body: JSON.stringify({ meta: {}, logs: [] }) })
+    expect(dropped.status).toBe(204)
+    const big = await app().request('/api/telemetry', { method: 'POST', body: 'x'.repeat(256 * 1024 + 1) })
+    expect(big.status).toBe(413)
+  })
 
   it('lets only the browser keep fingerprinted assets', async () => {
     const response = await app().request('/assets/index-abc123.js')

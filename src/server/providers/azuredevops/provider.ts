@@ -1,6 +1,7 @@
 import type { AzureDevopsSetup } from '../../../shared/api.ts'
 import type { RepoSnapshot } from '../../../shared/model.ts'
 import type { Config } from '../../config.ts'
+import type { CarriedCommit } from '../../../shared/outcomes.ts'
 import type { Logger } from '../../log.ts'
 import type { SecretBox } from '../../secrets.ts'
 import type { AccountRow, DiscoveredRepo, Store } from '../../store.ts'
@@ -156,6 +157,12 @@ export class AzureDevopsProvider implements Provider {
 
   async files(account: AccountRow, snapshot: RepoSnapshot): Promise<RepoFiles | null> {
     return azureDevopsFiles(this.client(), account.login, snapshot.id.slice(snapshot.id.lastIndexOf(':') + 1), snapshot.defaultBranch)
+  }
+
+  /** Azure DevOps compares only through a POST, which no conditional request covers, and it records no deployments to carry commits; the answer is unknown. */
+  async commitsBetween(_account: AccountRow, repo: Pick<RepoSnapshot, 'id' | 'fullName'>, base: string | null, head: string): Promise<CarriedCommit[] | null> {
+    this.log.debug('commits between revisions not read on azure devops', { repo: repo.fullName, base, head })
+    return null
   }
 
   // Clients ---------------------------------------------------------------------

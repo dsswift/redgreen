@@ -4,16 +4,19 @@ import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import { z } from 'zod'
 import type { SettingsResponse } from '../shared/api.ts'
+import { WINDOWS, type WindowDays } from '../shared/outcomes.ts'
 import { RULE_KEYS, SEVERITIES, defaultRuleSeverities, type RuleSeverities } from '../shared/rules.ts'
 import type { Config } from './config.ts'
 import type { Estate } from './estate.ts'
 import type { Events } from './events.ts'
 import type { Logger } from './log.ts'
+import type { Outcomes } from './outcomes/outcomes.ts'
 import type { AzureDevopsProvider } from './providers/azuredevops/provider.ts'
 import type { GithubProvider } from './providers/github/provider.ts'
 import type { GitlabProvider } from './providers/gitlab/provider.ts'
 import type { Provider } from './providers/provider.ts'
 import type { Store } from './store.ts'
+import type { Telemetry } from './telemetry.ts'
 import type { Scheduler } from './sync/scheduler.ts'
 
 export interface HttpDeps {
@@ -23,6 +26,8 @@ export interface HttpDeps {
   scheduler: Scheduler
   events: Events
   providers: Provider[]
+  outcomes: Outcomes
+  telemetry: Telemetry
   github: GithubProvider
   gitlab: GitlabProvider
   azuredevops: AzureDevopsProvider
@@ -38,6 +43,9 @@ const repoSettingsSchema = z.object({
   mutedPipelines: z.array(z.string()).optional(),
   ruleOverrides: z.object(Object.fromEntries(RULE_KEYS.map((k) => [k, severitySchema.optional()]))).optional(),
 })
+const windowSchema = z.coerce.number().refine((n): n is WindowDays => (WINDOWS as readonly number[]).includes(n))
+/** The largest browser telemetry batch relayed. */
+const TELEMETRY_BATCH_LIMIT = 256 * 1024
 const accountStatusSchema = z.object({ status: z.enum(['active', 'pending', 'ignored']) })
 const gitlabAppSchema = z.object({ clientId: z.string().trim().min(1), clientSecret: z.string().trim().min(1) })
 const azureDevopsAppSchema = z.object({
@@ -48,8 +56,14 @@ const azureDevopsAppSchema = z.object({
 })
 
 export function createApp(deps: HttpDeps): Hono {
-  const { config, store, estate, scheduler, events, providers, github, gitlab, azuredevops, log } = deps
+  const { config, store, estate, scheduler, events, providers, outcomes, telemetry, github, gitlab, azuredevops, log } = deps
   const app = new Hono()
+
+  app.use('/api/*', async (c, next) => {
+    const started = performance.now()
+    await next()
+    telemetry.request(c.req.routePath, c.req.method, c.res.status, (performance.now() - started) / 1000)
+  })
 
   // Every response is private: the site sits behind a shared CDN, and a copy
   // kept there would reach the next visitor without sign-in. Fingerprinted
@@ -102,6 +116,47 @@ export function createApp(deps: HttpDeps): Hono {
     if (!store.getRepo(id)) return c.json({ error: 'Unknown repo' }, 404)
     await scheduler.syncNow(id)
     return c.json(estate.detail(id))
+  })
+
+  // Outcomes -------------------------------------------------------------------
+
+  app.get('/api/outcomes', async (c) => {
+    const window = windowSchema.safeParse(c.req.query('window') ?? 30)
+    if (!window.success) return c.json({ error: `window must be one of ${WINDOWS.join(', ')}` }, 400)
+    return c.json(await outcomes.compute(window.data))
+  })
+
+  // Browser telemetry ------------------------------------------------------------
+
+  // The page posts here, never to the collector. The batch is capped, named, stripped of any user, and relayed with the key.
+  app.post('/api/telemetry', async (c) => {
+    const body = await c.req.text()
+    if (body.length > TELEMETRY_BATCH_LIMIT) {
+      telemetry.browserBatch('refused')
+      return c.body(null, 413)
+    }
+    if (!config.FARO_URL || !config.FARO_API_KEY) {
+      telemetry.browserBatch('dropped')
+      return c.body(null, 204)
+    }
+    let batch: { meta?: Record<string, unknown> }
+    try {
+      batch = JSON.parse(body) as { meta?: Record<string, unknown> }
+    } catch {
+      telemetry.browserBatch('refused')
+      return c.body(null, 400)
+    }
+    const { user: _user, ...kept } = batch.meta ?? {}
+    const meta = { ...kept, app: { ...((batch.meta?.app as Record<string, unknown> | undefined) ?? {}), name: 'redgreen-web' } }
+    try {
+      const res = await fetch(config.FARO_URL, { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': config.FARO_API_KEY }, body: JSON.stringify({ ...batch, meta }), signal: AbortSignal.timeout(10_000) })
+      telemetry.browserBatch(res.ok ? 'relayed' : 'failed')
+      if (!res.ok) log.warn('browser telemetry relay refused', { status: res.status })
+    } catch (error) {
+      telemetry.browserBatch('failed')
+      log.warn('browser telemetry relay failed', { error })
+    }
+    return c.body(null, 204)
   })
 
   app.post('/api/sync', (c) => {

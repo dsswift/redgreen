@@ -6,6 +6,8 @@ import { Estate } from './estate.ts'
 import { Events } from './events.ts'
 import { createApp } from './http.ts'
 import { createLogger } from './log.ts'
+import { OrreryReader } from './outcomes/orrery-reader.ts'
+import { Outcomes } from './outcomes/outcomes.ts'
 import { OrreryPusher } from './orrery.ts'
 import { AzureDevopsProvider } from './providers/azuredevops/provider.ts'
 import { GithubProvider } from './providers/github/provider.ts'
@@ -13,10 +15,13 @@ import { GitlabProvider } from './providers/gitlab/provider.ts'
 import { SecretBox } from './secrets.ts'
 import { Store } from './store.ts'
 import { Scheduler } from './sync/scheduler.ts'
+import { createTelemetry } from './telemetry.ts'
+import pkg from '../../package.json' with { type: 'json' }
 
 const log = createLogger('redgreen')
 const config = loadConfig()
 const dataDir = resolve(config.DATA_DIR)
+const telemetry = createTelemetry(config, pkg.version, createLogger('telemetry'))
 
 const opening = Date.now()
 const store = new Store(join(dataDir, 'redgreen.sqlite'))
@@ -28,8 +33,10 @@ const gitlab = new GitlabProvider(config, store, secrets, createLogger('gitlab')
 const azuredevops = new AzureDevopsProvider(config, store, secrets, createLogger('azuredevops'))
 const providers = [github, gitlab, azuredevops]
 const estate = new Estate(store, providers)
-const scheduler = new Scheduler(providers, store, estate, events, config, createLogger('sync'))
-const orrery = new OrreryPusher(config, store, estate, events, createLogger('orrery'))
+const outcomes = new Outcomes(store, providers, telemetry, createLogger('outcomes'))
+const scheduler = new Scheduler(providers, store, estate, events, outcomes, config, createLogger('sync'))
+const orrery = new OrreryPusher(config, store, estate, events, outcomes, createLogger('orrery'))
+const orreryReader = new OrreryReader(config, store, outcomes, createLogger('orrery-reader'))
 
 const webDir = resolve(import.meta.dirname, '../../dist/web')
 const app = createApp({
@@ -39,6 +46,8 @@ const app = createApp({
   scheduler,
   events,
   providers,
+  outcomes,
+  telemetry,
   github,
   gitlab,
   azuredevops,
@@ -50,6 +59,7 @@ const server = serve({ fetch: app.fetch, port: config.PORT, hostname: config.HOS
   log.info('listening', { host: info.address, port: info.port, publicUrl: config.PUBLIC_URL, web: existsSync(webDir), dataDir })
   scheduler.start()
   orrery.start()
+  orreryReader.start()
 })
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
@@ -57,9 +67,10 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     log.info('shutting down', { signal })
     scheduler.stop()
     orrery.stop()
+    orreryReader.stop()
     server.close(() => {
       store.close()
-      process.exit(0)
+      void telemetry.shutdown().finally(() => process.exit(0))
     })
     // Open event streams would otherwise hold the server open indefinitely.
     if ('closeAllConnections' in server) server.closeAllConnections()
