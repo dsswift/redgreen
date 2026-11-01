@@ -1,8 +1,7 @@
-// Where incidents would come from. None exists yet: no provider reports an
-// alert that fired on a service, so change failure rate and time to restore
-// are judged from deployments alone. A source that can answer plugs in here
-// and nowhere else; `classify` in shared/outcomes.ts already takes what it
-// returns.
+// Where incidents come from. A source that can say an alert fired on a
+// service plugs in here and nowhere else; `classify` in shared/outcomes.ts
+// takes what it returns. With none registered, change failure rate and time
+// to restore are judged from deployments alone.
 
 import type { Incident } from '../../shared/outcomes.ts'
 
@@ -11,7 +10,7 @@ export interface IncidentSource {
   incidents(since: string): Promise<Incident[]>
 }
 
-/** The sources registered. Empty today; `register` is the one way to add one. */
+/** The sources registered. `registerIncidentSource` is the one way to add one. */
 const sources: IncidentSource[] = []
 
 export function registerIncidentSource(source: IncidentSource): void {

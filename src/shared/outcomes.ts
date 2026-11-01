@@ -39,7 +39,7 @@ export interface DeploymentRecord {
   commits: CarriedCommit[] | null
 }
 
-/** Something that went wrong in production and was noticed, from an incident source. None exists yet; see `server/outcomes/incidents.ts`. */
+/** Something that went wrong in production and was noticed, from an incident source; see `server/outcomes/incidents.ts`. */
 export interface Incident {
   repoId: string
   service: string

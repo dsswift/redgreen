@@ -415,7 +415,7 @@ export class OrreryPusher {
     const account = row && this.store.getAccount(row.accountId)
     if (!row?.snapshot || !account || account.status !== 'active') return
     if (!(await this.offer())) return
-    const measures = this.outcomes.measuresFor(row.id)
+    const measures = this.outcomes.measuresFor(row.id, Date.now(), await this.outcomes.recentIncidents())
     const entity = toRepository(row.snapshot, account, this.estate.healthOf(row), this.boardUrl(row.id), Date.now(), measures)
     try {
       const scope = `${account.provider}/${account.login}`.toLowerCase()
@@ -432,6 +432,7 @@ export class OrreryPusher {
   async pushAll(reason: string): Promise<void> {
     if (!(await this.offer())) return
     const rows = this.store.listRepos()
+    const incidents = await this.outcomes.recentIncidents()
     for (const account of this.store.listAccounts()) {
       if (account.status !== 'active') continue
       const mine = rows.filter((r) => r.accountId === account.id)
@@ -440,7 +441,7 @@ export class OrreryPusher {
       const mode = synced.length === mine.length ? 'snapshot' : 'incremental'
       const scope = `${account.provider}/${account.login}`.toLowerCase()
       try {
-        const measures = new Map(synced.map((r) => [r.id, this.outcomes.measuresFor(r.id)]))
+        const measures = new Map(synced.map((r) => [r.id, this.outcomes.measuresFor(r.id, Date.now(), incidents)]))
         const entities = synced.map((r) => toRepository(r.snapshot!, account, this.estate.healthOf(r), this.boardUrl(r.id), Date.now(), measures.get(r.id) ?? null))
         const rejected = await this.run(mode, scope, entities, 'repository')
         this.log.info('orrery push done', { reason, account: account.login, mode, repositories: entities.length, unsynced: mine.length - synced.length, rejected })

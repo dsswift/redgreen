@@ -5,7 +5,7 @@
 
 import type { OutcomesResponse } from '../../shared/api.ts'
 import type { Release, RepoSnapshot } from '../../shared/model.ts'
-import { measure, classify, outcomes, type DeploymentRecord, type Measures, type WindowDays } from '../../shared/outcomes.ts'
+import { measure, classify, outcomes, type DeploymentRecord, type Incident, type Measures, type WindowDays } from '../../shared/outcomes.ts'
 import type { Logger } from '../log.ts'
 import type { Provider } from '../providers/provider.ts'
 import type { AccountRow, RepoRow, Store } from '../store.ts'
@@ -114,10 +114,15 @@ export class Outcomes {
     })
   }
 
+  /** The incidents the last 30 days of measures count, read once per catalog push. */
+  recentIncidents(now = Date.now()): Promise<Incident[]> {
+    return incidentsSince(new Date(now - 30 * DAY_MS).toISOString())
+  }
+
   /** The last 30 days of one repository, whole and per service folder, for the catalog push. */
-  measuresFor(repoId: string, now = Date.now()): { repo: Measures; services: Map<string, Measures> } {
+  measuresFor(repoId: string, now = Date.now(), incidents: Incident[] = []): { repo: Measures; services: Map<string, Measures> } {
     const from = now - 30 * DAY_MS
-    const classified = classify(this.store.listDeployments(repoId, new Date(from).toISOString()))
+    const classified = classify(this.store.listDeployments(repoId, new Date(from).toISOString()), incidents)
     const services = new Map<string, Measures>()
     for (const service of new Set(classified.map((d) => d.service))) services.set(service, measure(classified.filter((d) => d.service === service), from, now))
     return { repo: measure(classified, from, now), services }

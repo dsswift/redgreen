@@ -21,6 +21,10 @@ const schema = z.object({
   ORRERY_TOKEN: z.string().optional(),
   /** An access token for the hub, which may read. With ORRERY_URL, the ArgoCD syncs the hub holds are read as deployments for Outcomes. A source token may not read. */
   ORRERY_READ_TOKEN: z.string().optional(),
+  /** A Dispatch desk's API port, such as `http://dispatch.dispatch.svc:8081`. With a token, its incidents count in Outcomes. */
+  DISPATCH_URL: z.string().url().optional(),
+  /** A token the desk issued (Settings, API tokens) or its shared `ALERTMANAGER_TOKEN`. */
+  DISPATCH_TOKEN: z.string().optional(),
   /** Where traces and metrics go over OTLP/HTTP. Unset, telemetry is off. */
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
   OTEL_SERVICE_NAME: z.string().optional(),

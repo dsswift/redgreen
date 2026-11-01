@@ -107,6 +107,7 @@ export class OrreryReader {
   private readonly outcomes: Outcomes
   private readonly log: Logger
   private timer: NodeJS.Timeout | null = null
+  private catalog: OrreryWorkload[] = []
 
   constructor(config: Config, store: Store, outcomes: Outcomes, log: Logger) {
     this.url = (config.ORRERY_URL ?? '').replace(/\/$/, '')
@@ -137,6 +138,11 @@ export class OrreryReader {
     if (this.timer) clearInterval(this.timer)
   }
 
+  /** The catalog's workloads as of the last read, empty before the first. */
+  workloads(): OrreryWorkload[] {
+    return this.catalog
+  }
+
   private async get<T>(path: string): Promise<T> {
     const res = await fetch(this.url + path, { headers: { authorization: `Bearer ${this.token}`, accept: 'application/json' }, signal: AbortSignal.timeout(60_000) })
     const text = await res.text()
@@ -164,6 +170,7 @@ export class OrreryReader {
         this.entities<OrreryApp>('argocd_app'),
         this.entities<OrreryWorkload>('workload'),
       ])
+      this.catalog = workloads
       const gitlabHost = new URL(this.config.GITLAB_URL).hostname
       const mapped = mapOrreryDeployments(deployments, apps, workloads, (ref) => this.store.findRepoByFullName(ref.provider, ref.fullName)?.id ?? null, gitlabHost)
       const fresh = this.outcomes.keep(mapped.records)

@@ -19,6 +19,8 @@ export interface Telemetry {
   compute<T>(window: number, fn: () => T): T
   /** Counts a deployment kept for Outcomes, by where it came from and how it ended. */
   deploymentIngested(source: string, outcome: string): void
+  /** Counts one read of an incident source, by source and whether it answered. */
+  incidentsRead(source: string, outcome: 'ok' | 'failed'): void
   /** Counts a browser telemetry batch by what became of it. */
   browserBatch(outcome: 'relayed' | 'dropped' | 'refused' | 'failed'): void
   /** Records one served request by route pattern, method, and status. */
@@ -47,6 +49,7 @@ export function createTelemetry(config: Pick<Config, 'OTEL_EXPORTER_OTLP_ENDPOIN
   meter.createObservableGauge(`${SERVICE}.build_info`, { description: 'Always 1, labelled with the running version.' }).addCallback((o) => o.observe(1, { version }))
   const computeDuration = meter.createHistogram(`${SERVICE}.outcomes.compute.duration`, { unit: 's', description: 'How long one Outcomes computation took.' })
   const ingested = meter.createCounter(`${SERVICE}.outcomes.deployments_ingested`, { description: 'Deployments kept for Outcomes, by source and outcome.' })
+  const incidentsRead = meter.createCounter(`${SERVICE}.outcomes.incidents_read`, { description: 'Reads of an incident source, by source and outcome.' })
   const batches = meter.createCounter(`${SERVICE}.telemetry.batches`, { description: 'Browser telemetry batches, by what became of them.' })
   const requests = meter.createHistogram('http.server.request.duration', { unit: 's', description: 'Served requests by route, method, and status.' })
 
@@ -69,6 +72,9 @@ export function createTelemetry(config: Pick<Config, 'OTEL_EXPORTER_OTLP_ENDPOIN
     },
     deploymentIngested(source, outcome) {
       ingested.add(1, { source, outcome } satisfies Attributes)
+    },
+    incidentsRead(source, outcome) {
+      incidentsRead.add(1, { source, outcome })
     },
     browserBatch(outcome) {
       batches.add(1, { outcome })

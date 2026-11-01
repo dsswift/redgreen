@@ -6,6 +6,7 @@ import { Estate } from './estate.ts'
 import { Events } from './events.ts'
 import { createApp } from './http.ts'
 import { createLogger } from './log.ts'
+import { DispatchIncidents } from './outcomes/dispatch.ts'
 import { OrreryReader } from './outcomes/orrery-reader.ts'
 import { Outcomes } from './outcomes/outcomes.ts'
 import { OrreryPusher } from './orrery.ts'
@@ -37,6 +38,7 @@ const outcomes = new Outcomes(store, providers, telemetry, createLogger('outcome
 const scheduler = new Scheduler(providers, store, estate, events, outcomes, config, createLogger('sync'))
 const orrery = new OrreryPusher(config, store, estate, events, outcomes, createLogger('orrery'))
 const orreryReader = new OrreryReader(config, store, outcomes, createLogger('orrery-reader'))
+new DispatchIncidents(config, orreryReader, store, telemetry, createLogger('dispatch')).register()
 
 const webDir = resolve(import.meta.dirname, '../../dist/web')
 const app = createApp({

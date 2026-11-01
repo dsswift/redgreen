@@ -44,9 +44,14 @@ Estate health board. Read `README.md` first.
   `repo` URL, read by `repo-url.ts`, says which repository and folder a sync
   belongs to. A sync whose revision lives in another repository is marked
   `revisionElsewhere` and the repository's release tags stand in for it.
-- Incidents have one entry point, `server/outcomes/incidents.ts`. No source
-  exists yet; a source that can say an alert fired on a service registers
-  there and `classify` already takes what it returns.
+- Incidents have one entry point, `server/outcomes/incidents.ts`; a source
+  registers there and `classify` takes what it returns. The one source is
+  `server/outcomes/dispatch.ts`, on when `DISPATCH_URL` and `DISPATCH_TOKEN`
+  are set: it reads a Dispatch desk's `GET /v1/incidents` and
+  `mapDispatchIncidents` ties each incident to a repository and folder
+  through the incident's Orrery workload and the catalog's workload `repo`
+  URL, the workloads the Orrery reader last read. Info incidents are left
+  out; an incident ends when it is mitigated, or resolved without that.
 - Telemetry is `server/telemetry.ts`: OTLP on when `OTEL_EXPORTER_OTLP_ENDPOINT`
   is set, no-ops otherwise, so the code that measures never checks. The page
   runs Faro from `web/telemetry.ts` and posts to `/api/telemetry`. An event
