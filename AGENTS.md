@@ -25,6 +25,9 @@ Estate health board. Read `README.md` first.
   fields of the last 30 days, from `Outcomes.measuresFor`; `dora_grade` is
   the worst DORA band among the measures with data. It speaks plain HTTP; do
   not add an SDK.
+- `server/describe.ts` writes redgreen's own description from the root
+  `orrery.yaml` when `ORRERY_URL` and `ORRERY_PUSH_TOKEN` are set. It reads
+  only `ORRERY_PUSH_TOKEN`. The image must carry `orrery.yaml`.
 - `server/services.ts` finds the services in a repo from the files that build
   them. `detectServices` is the only place a service is recognised; a
   provider only hands over its file list and a reader through `files` on

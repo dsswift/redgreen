@@ -21,6 +21,8 @@ export interface Telemetry {
   deploymentIngested(source: string, outcome: string): void
   /** Counts one read of an incident source, by source and whether it answered. */
   incidentsRead(source: string, outcome: 'ok' | 'failed'): void
+  /** Counts one write of redgreen's own description to Orrery, by outcome. */
+  described(outcome: 'ok' | 'failed'): void
   /** Counts a browser telemetry batch by what became of it. */
   browserBatch(outcome: 'relayed' | 'dropped' | 'refused' | 'failed'): void
   /** Records one served request by route pattern, method, and status. */
@@ -50,6 +52,7 @@ export function createTelemetry(config: Pick<Config, 'OTEL_EXPORTER_OTLP_ENDPOIN
   const computeDuration = meter.createHistogram(`${SERVICE}.outcomes.compute.duration`, { unit: 's', description: 'How long one Outcomes computation took.' })
   const ingested = meter.createCounter(`${SERVICE}.outcomes.deployments_ingested`, { description: 'Deployments kept for Outcomes, by source and outcome.' })
   const incidentsRead = meter.createCounter(`${SERVICE}.outcomes.incidents_read`, { description: 'Reads of an incident source, by source and outcome.' })
+  const describes = meter.createCounter(`${SERVICE}.orrery.describe`, { description: "Writes of the app's own description to Orrery, by outcome." })
   const batches = meter.createCounter(`${SERVICE}.telemetry.batches`, { description: 'Browser telemetry batches, by what became of them.' })
   const requests = meter.createHistogram('http.server.request.duration', { unit: 's', description: 'Served requests by route, method, and status.' })
 
@@ -75,6 +78,9 @@ export function createTelemetry(config: Pick<Config, 'OTEL_EXPORTER_OTLP_ENDPOIN
     },
     incidentsRead(source, outcome) {
       incidentsRead.add(1, { source, outcome })
+    },
+    described(outcome) {
+      describes.add(1, { outcome })
     },
     browserBatch(outcome) {
       batches.add(1, { outcome })

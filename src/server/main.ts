@@ -2,6 +2,7 @@ import { serve } from '@hono/node-server'
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { loadConfig } from './config.ts'
+import { Describer, loadDescriptor } from './describe.ts'
 import { Estate } from './estate.ts'
 import { Events } from './events.ts'
 import { createApp } from './http.ts'
@@ -23,6 +24,7 @@ const log = createLogger('redgreen')
 const config = loadConfig()
 const dataDir = resolve(config.DATA_DIR)
 const telemetry = createTelemetry(config, pkg.version, createLogger('telemetry'))
+const describer = new Describer(config, loadDescriptor(), telemetry, createLogger('orrery-describe'))
 
 const opening = Date.now()
 const store = new Store(join(dataDir, 'redgreen.sqlite'))
@@ -62,6 +64,7 @@ const server = serve({ fetch: app.fetch, port: config.PORT, hostname: config.HOS
   scheduler.start()
   orrery.start()
   orreryReader.start()
+  describer.start()
 })
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
@@ -70,6 +73,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     scheduler.stop()
     orrery.stop()
     orreryReader.stop()
+    describer.stop()
     server.close(() => {
       store.close()
       void telemetry.shutdown().finally(() => process.exit(0))

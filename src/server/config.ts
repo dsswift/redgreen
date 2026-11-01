@@ -19,6 +19,8 @@ const schema = z.object({
   ORRERY_URL: z.string().url().optional(),
   /** A source token for the hub. */
   ORRERY_TOKEN: z.string().optional(),
+  /** A source token for the same hub, registered for `service` and `api`. With ORRERY_URL, redgreen writes its own description from `orrery.yaml` there. */
+  ORRERY_PUSH_TOKEN: z.string().optional(),
   /** An access token for the hub, which may read. With ORRERY_URL, the ArgoCD syncs the hub holds are read as deployments for Outcomes. A source token may not read. */
   ORRERY_READ_TOKEN: z.string().optional(),
   /** A Dispatch desk's API port, such as `http://dispatch.dispatch.svc:8081`. With a token, its incidents count in Outcomes. */
