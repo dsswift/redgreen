@@ -55,6 +55,12 @@ All notable changes to this project will be documented in this file. See [standa
 * one language list and open fields ([dafe517](https://github.com/dsswift/redgreen/commit/dafe5174f0f73ab5ec834e686569882f91c35749))
 * push forge deployments to orrery ([185abff](https://github.com/dsswift/redgreen/commit/185abff406076d4b4a343b502ade925caf96625e))
 
+## [0.2.16](https://github.com/dsswift/redgreen/compare/v0.2.15...v0.2.16) (2026-11-02)
+
+### Features
+
+* write orrery under the standard blueprint ids ([2d67912](https://github.com/dsswift/redgreen/commit/2d67912f831cd0bc2cde82302ea14488914cc778))
+
 ## [0.2.15](https://github.com/dsswift/redgreen/compare/v0.2.14...v0.2.15) (2026-11-01)
 
 ### Features
