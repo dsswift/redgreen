@@ -15,10 +15,12 @@ Estate health board. Read `README.md` first.
   import forge-specific types. Adding a forge means adding a directory here
   and registering it in `main.ts`. What every forge shares (`isStatus`,
   `RateLimits`) lives directly under `providers/`.
-- `server/orrery.ts` pushes every repo to an Orrery hub as a `repository`
-  entity when `ORRERY_URL` and `ORRERY_TOKEN` are set. `toRepository` is the
+- `server/orrery.ts` pushes every repo to an Orrery hub as an
+  `sw_repository` entity when `ORRERY_URL` and `ORRERY_TOKEN` are set. `toRepository` is the
   only place the mapping lives, and `REPOSITORY_BLUEPRINT` beside it is what
-  the hub is offered: a field written must be defined there. `toDeployments`
+  the hub is offered: a field written must be defined there. Blueprint ids
+  follow the blueprint standard (`sw_repository`, `sw_service`,
+  `sw_deployment`); each offer names its old id under `formerly`. `toDeployments`
   and `DEPLOYMENT_BLUEPRINT` do the same for the deployments a forge records.
   A provider that reads none leaves `deployments` off its snapshot. `toServices`
   and `SERVICE_BLUEPRINT` do the same for services. Both carry the `dora_*`

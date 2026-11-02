@@ -1,7 +1,7 @@
-// Pushes every repository to an Orrery hub as a `repository` entity, so the
-// catalog there lists what this board watches, every service found in one as
-// a `service` entity, and every finished deployment the forge recorded as a
-// `deployment` entity. The blueprints travel with the push and are offered to
+// Pushes every repository to an Orrery hub as an `sw_repository` entity, so
+// the catalog there lists what this board watches, every service found in one
+// as an `sw_service` entity, and every finished deployment the forge recorded
+// as an `sw_deployment` entity. The blueprints travel with the push and are offered to
 // the hub first. Repositories and services each go as one snapshot run per
 // account, and a single repo and its services are patched as soon as it
 // syncs. Deployments only accumulate, so they go in an incremental run of
@@ -19,14 +19,14 @@ import type { Outcomes } from './outcomes/outcomes.ts'
 import type { AccountRow, Store } from './store.ts'
 
 export interface RepositoryEntity {
-  blueprint: 'repository'
+  blueprint: 'sw_repository'
   key: string
   title: string
   fields: Record<string, unknown>
 }
 
 export interface ServiceEntity {
-  blueprint: 'service'
+  blueprint: 'sw_service'
   key: string
   title: string
   icon?: string
@@ -35,7 +35,7 @@ export interface ServiceEntity {
 }
 
 export interface DeploymentEntity {
-  blueprint: 'deployment'
+  blueprint: 'sw_deployment'
   key: string
   title: string
   fields: Record<string, unknown>
@@ -80,9 +80,10 @@ const FAILED = { field: 'status', op: 'eq', value: 'failed' }
 
 /** What `toRepository` writes. The hub creates it when it has none and leaves an existing one as it is. */
 export const REPOSITORY_BLUEPRINT = {
-  id: 'repository',
+  id: 'sw_repository',
   title: 'Repository',
-  group: 'Catalog',
+  group: 'Software',
+  formerly: ['repository'],
   description:
     'A Git repository on a forge, pushed by the repo health board: language, branch protection, last push, pipeline health, alert counts. Relate your own blueprints to it: the service built from it, the team that owns it.',
   icon: 'repository',
@@ -137,22 +138,23 @@ export const REPOSITORY_BLUEPRINT = {
 
 /** What a repository can say once the hub holds deployments that point at it. Offered after the deployment blueprint is accepted, because these read through it. */
 const REPOSITORY_DEPLOYMENT_FIELDS = {
-  id: 'repository',
+  id: 'sw_repository',
   title: 'Repository',
   fields: {
-    last_deployed_at: { type: 'datetime', title: 'Last deployed', aggregation: { relation: '<-deployment:repository', fn: 'max', field: 'deployed_at', where: SUCCEEDED } },
-    deployments_30d: { type: 'number', title: 'Deployments (30d)', aggregation: { relation: '<-deployment:repository', fn: 'count', where: SUCCEEDED, window: { field: 'deployed_at', last: '30d' } } },
-    failed_deployments_30d: { type: 'number', title: 'Failed deployments (30d)', aggregation: { relation: '<-deployment:repository', fn: 'count', where: FAILED, window: { field: 'deployed_at', last: '30d' } } },
-    deployments_per_week: { type: 'number', title: 'Deployments per week', description: 'Successful deployments per week over the last 90 days.', aggregation: { relation: '<-deployment:repository', fn: 'count', where: SUCCEEDED, window: { field: 'deployed_at', last: '90d' }, per: 'week' } },
+    last_deployed_at: { type: 'datetime', title: 'Last deployed', aggregation: { relation: '<-sw_deployment:repository', fn: 'max', field: 'deployed_at', where: SUCCEEDED } },
+    deployments_30d: { type: 'number', title: 'Deployments (30d)', aggregation: { relation: '<-sw_deployment:repository', fn: 'count', where: SUCCEEDED, window: { field: 'deployed_at', last: '30d' } } },
+    failed_deployments_30d: { type: 'number', title: 'Failed deployments (30d)', aggregation: { relation: '<-sw_deployment:repository', fn: 'count', where: FAILED, window: { field: 'deployed_at', last: '30d' } } },
+    deployments_per_week: { type: 'number', title: 'Deployments per week', description: 'Successful deployments per week over the last 90 days.', aggregation: { relation: '<-sw_deployment:repository', fn: 'count', where: SUCCEEDED, window: { field: 'deployed_at', last: '90d' }, per: 'week' } },
     change_failure_rate: { type: 'number', title: 'Change failure rate (%)', description: "The share of the last 30 days' deployments that failed.", calculation: 'deployments_30d + failed_deployments_30d > 0 ? round(failed_deployments_30d / (deployments_30d + failed_deployments_30d) * 100) : null' },
   },
 }
 
 /** What `toServices` writes. A hub that already has a service blueprint gains the fields and the relation it lacks, and keeps the rest of it as people made it. */
 export const SERVICE_BLUEPRINT = {
-  id: 'service',
+  id: 'sw_service',
   title: 'Service',
-  group: 'Catalog',
+  group: 'Software',
+  formerly: ['service'],
   description:
     'One piece of software people run and answer for: an app, an API, a job, a command-line tool, a library others build on, or the infrastructure it stands on. The repo health board finds each one from the files that build it and pushes where it lives, what kind it is, and what it is written in. What people decide about it, such as how much it matters, its lifecycle, and its runbook, is theirs to add here.',
   icon: 'service',
@@ -172,7 +174,7 @@ export const SERVICE_BLUEPRINT = {
     ...DORA_FIELDS,
   },
   relations: {
-    repository: { target: 'repository', many: false, title: 'Homed in', inverseTitle: 'Services' },
+    repository: { target: 'sw_repository', many: false, title: 'Homed in', inverseTitle: 'Services' },
   },
 }
 
@@ -198,9 +200,10 @@ const LANGUAGE_ICONS: Partial<Record<Language, string>> = {
 
 /** What `toDeployments` writes. A hub that already has a deployment blueprint from another pusher gains the fields and the relation it lacks. */
 export const DEPLOYMENT_BLUEPRINT = {
-  id: 'deployment',
+  id: 'sw_deployment',
   title: 'Deployment',
-  group: 'Catalog',
+  group: 'Software',
+  formerly: ['deployment'],
   description:
     'One time a version was rolled out. These come from the deployments a forge records when a pipeline job names an environment. Deployments only accumulate, so they leave by age. Count them over a window to see how often and how reliably something deploys.',
   icon: 'rocket',
@@ -218,7 +221,7 @@ export const DEPLOYMENT_BLUEPRINT = {
     url: { type: 'url', title: 'Open' },
   },
   relations: {
-    repository: { target: 'repository', many: false, title: 'Repository', inverseTitle: 'Deployments' },
+    repository: { target: 'sw_repository', many: false, title: 'Repository', inverseTitle: 'Deployments' },
   },
 }
 
@@ -230,7 +233,7 @@ export function toServices(repo: RepoSnapshot, measures: RepoMeasures | null = n
   return (repo.services?.services ?? []).map((s) => {
     const icon = s.language ? LANGUAGE_ICONS[s.language] : undefined
     return {
-      blueprint: 'service',
+      blueprint: 'sw_service',
       key: s.id ? `${key}/${s.id.toLowerCase()}` : key,
       title: s.name,
       ...(icon ? { icon } : {}),
@@ -250,7 +253,7 @@ export function toDeployments(repo: RepoSnapshot): DeploymentEntity[] {
       const fields: Record<string, unknown> = { status: d.status, environment_name: d.environment, revision: d.sha, ref: d.ref, deployed_at: d.finishedAt, started_at: d.createdAt, initiated_by: d.actor }
       if (Number.isFinite(seconds) && seconds >= 0) fields.duration_seconds = Math.round(seconds)
       if (d.url) fields.url = d.url
-      return { blueprint: 'deployment', key: `${key}/${d.id}`, title: `${repo.name} to ${d.environment}`, fields, relations: { repository: key } }
+      return { blueprint: 'sw_deployment', key: `${key}/${d.id}`, title: `${repo.name} to ${d.environment}`, fields, relations: { repository: key } }
     })
 }
 
@@ -313,7 +316,7 @@ export function toRepository(repo: RepoSnapshot, account: Pick<AccountRow, 'logi
       last_commit_at: repo.facts.lastCommitAt,
     })
   }
-  return { blueprint: 'repository', key: repositoryKey(repo), title: repo.name, fields }
+  return { blueprint: 'sw_repository', key: repositoryKey(repo), title: repo.name, fields }
 }
 
 export class OrreryPusher {
@@ -385,15 +388,15 @@ export class OrreryPusher {
     try {
       const res = (await this.call('PUT', '/ingest/blueprints', { blueprints: [REPOSITORY_BLUEPRINT, SERVICE_BLUEPRINT, DEPLOYMENT_BLUEPRINT] })) as { created?: string[]; extended?: string[]; rejected?: { blueprint: string; reason: string }[] }
       // Repositories are the point; a hub that will not take deployments still gets them.
-      const refused = res.rejected?.find((r) => r.blueprint === 'repository')
+      const refused = res.rejected?.find((r) => r.blueprint === 'sw_repository')
       if (refused) {
         this.log.error('orrery refused the repository blueprint', { reason: refused.reason })
         return false
       }
-      const services = res.rejected?.find((r) => r.blueprint === 'service')
+      const services = res.rejected?.find((r) => r.blueprint === 'sw_service')
       this.services = !services
       if (services) this.log.warn('orrery refused the service blueprint; services are not pushed', { reason: services.reason })
-      const deployments = res.rejected?.find((r) => r.blueprint === 'deployment')
+      const deployments = res.rejected?.find((r) => r.blueprint === 'sw_deployment')
       this.deployments = !deployments
       if (deployments) this.log.warn('orrery refused the deployment blueprint; deployments are not pushed', { reason: deployments.reason })
       else {
@@ -419,9 +422,9 @@ export class OrreryPusher {
     const entity = toRepository(row.snapshot, account, this.estate.healthOf(row), this.boardUrl(row.id), Date.now(), measures)
     try {
       const scope = `${account.provider}/${account.login}`.toLowerCase()
-      await this.call('PATCH', `/ingest/entities/repository/${encodeURIComponent(entity.key)}`, { title: entity.title, fields: entity.fields, scope })
+      await this.call('PATCH', `/ingest/entities/sw_repository/${encodeURIComponent(entity.key)}`, { title: entity.title, fields: entity.fields, scope })
       const services = this.services ? toServices(row.snapshot, measures) : []
-      for (const s of services) await this.call('PATCH', `/ingest/entities/service/${encodeURIComponent(s.key)}`, { title: s.title, ...(s.icon ? { icon: s.icon } : {}), fields: s.fields, relations: s.relations, scope: `${scope}/services` })
+      for (const s of services) await this.call('PATCH', `/ingest/entities/sw_service/${encodeURIComponent(s.key)}`, { title: s.title, ...(s.icon ? { icon: s.icon } : {}), fields: s.fields, relations: s.relations, scope: `${scope}/services` })
       this.log.debug('orrery repo pushed', { repo: row.fullName, services: services.length })
     } catch (error) {
       this.log.warn('orrery repo push failed', { repo: row.fullName, error })

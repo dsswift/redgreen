@@ -166,9 +166,9 @@ export class OrreryReader {
       const since = new Date(started - KEEP_DAYS * DAY_MS).toISOString()
       const filter = encodeURIComponent(JSON.stringify({ field: 'deployed_at', op: 'gte', value: since }))
       const [deployments, apps, workloads] = await Promise.all([
-        this.entities<OrreryDeployment>('deployment', `&filter=${filter}&sort=-deployed_at`),
+        this.entities<OrreryDeployment>('sw_deployment', `&filter=${filter}&sort=-deployed_at`),
         this.entities<OrreryApp>('argocd_app'),
-        this.entities<OrreryWorkload>('workload'),
+        this.entities<OrreryWorkload>('sw_workload'),
       ])
       this.catalog = workloads
       const gitlabHost = new URL(this.config.GITLAB_URL).hostname

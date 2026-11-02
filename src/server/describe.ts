@@ -1,6 +1,7 @@
 // Describes redgreen itself to the Orrery it runs beside, from the
-// orrery.yaml at the repository root: the service it is, the pillars it
-// covers, the APIs it provides, and the APIs it calls. On when ORRERY_URL and
+// orrery.yaml at the repository root: the service it is, the fields and
+// relations that place it in the estate's own scheme, the APIs it provides,
+// and the APIs it calls. On when ORRERY_URL and
 // ORRERY_PUSH_TOKEN are both set. The service is patched, so the fields other
 // sources write stay theirs, and no snapshot is opened, so nothing another
 // source wrote is removed. It writes again after a failure with a growing
@@ -26,10 +27,13 @@ const providedApi = z.strictObject({
   description: z.string().default(''),
 })
 
+const NAME = /^[a-z][a-z0-9_]*$/
+
 const descriptor = z.strictObject({
   service: z.string().default(''),
-  category: z.string().default(''),
-  domains: z.array(z.string()).nullish().transform((v) => v ?? []),
+  /** Fields and relations that place the service in one estate's own scheme. The estate defines them; left out, they are never written. */
+  fields: z.record(z.string().regex(NAME), z.unknown()).nullish().transform((v) => v ?? {}),
+  relations: z.record(z.string().regex(NAME), z.union([z.string().min(1), z.array(z.string().min(1))])).nullish().transform((v) => v ?? {}),
   provides: z.array(providedApi).nullish().transform((v) => v ?? []),
   consumes: z.array(z.string()).nullish().transform((v) => v ?? []),
   will_consume: z.array(z.string()).nullish().transform((v) => v ?? []),
@@ -55,7 +59,7 @@ export function parseDescriptor(text: string): Descriptor {
 
 export interface DescribeWrite {
   method: 'PATCH' | 'PUT'
-  blueprint: 'service' | 'api'
+  blueprint: 'sw_service' | 'sw_api'
   key: string
   body: { title?: string; fields: Record<string, unknown>; relations: Record<string, unknown> }
 }
@@ -69,38 +73,50 @@ export function describeWrites(d: Descriptor): DescribeWrite[] {
   return [
     {
       method: 'PATCH',
-      blueprint: 'service',
+      blueprint: 'sw_service',
       key: d.service,
-      body: { fields: { origin: 'built', category: d.category }, relations: { domains: d.domains, consumes: d.consumes, will_consume: d.will_consume } },
+      body: { fields: { ...d.fields, origin: 'built' }, relations: { ...d.relations, consumes: d.consumes, will_consume: d.will_consume } },
     },
     ...d.provides.map((a): DescribeWrite => ({
       method: 'PUT',
-      blueprint: 'api',
+      blueprint: 'sw_api',
       key: `${d.service}/${a.id}`,
       body: { title: a.title, fields: { kind: a.kind, description: a.description, visibility: 'internal', external: false }, relations: { service: d.service } },
     })),
   ]
 }
 
-/** The fields and relations a description writes, which a hub without them gains on first offer. */
+/**
+ * The blueprints a description writes, named as the software pack of the
+ * blueprint standard names them, offered so a hub without them gains them.
+ * `formerly` takes over a hub's older `service` and `api`.
+ */
 export const DESCRIBE_BLUEPRINTS = [
   {
-    id: 'service',
+    id: 'sw_service',
     title: 'Service',
-    fields: {
-      origin: { type: 'enum', values: ['built', 'adopted'], chip: true, description: 'Built here, or open source the estate runs.' },
-      category: { type: 'string', chip: true, description: 'Its box inside a pillar on the landscape.' },
-    },
+    group: 'Software',
+    formerly: ['service'],
+    description: 'One deployable piece of software, keyed by its repository path. Built here or adopted open source.',
+    fields: { origin: { type: 'enum', values: ['built', 'adopted'], chip: true, description: 'Built here, or open source the estate runs.' } },
     relations: {
-      will_consume: { target: 'api', many: true, title: 'Will consume', inverseTitle: 'Wanted by' },
+      consumes: { target: 'sw_api', many: true, title: 'Consumes', inverseTitle: 'Consumed by' },
+      will_consume: { target: 'sw_api', many: true, title: 'Will consume', inverseTitle: 'Wanted by' },
     },
   },
   {
-    id: 'api',
+    id: 'sw_api',
     title: 'API',
+    group: 'Software',
+    formerly: ['api'],
+    description: 'An interface a service offers others, keyed <service key>/<id>.',
     fields: {
-      category: { type: 'string', chip: true, description: 'Its box inside a pillar on the landscape.' },
+      description: { type: 'string' },
+      kind: { type: 'enum', values: ['rest', 'graphql', 'grpc', 'event', 'web'] },
+      visibility: { type: 'enum', values: ['internal', 'partner', 'public'] },
+      external: { type: 'boolean' },
     },
+    relations: { service: { target: 'sw_service', title: 'Provided by', inverseTitle: 'Provides' } },
   },
 ]
 

@@ -1,13 +1,15 @@
 # What this app is, for the Orrery it runs beside. At start the app writes
 # its own service, the APIs it provides, and the APIs it calls, when
-# ORRERY_URL and ORRERY_PUSH_TOKEN are set, so every estate that runs it knows the
-# same facts. Pillars are platform/* domains; an API key is the providing
-# service's key and the API's id.
+# ORRERY_URL and ORRERY_PUSH_TOKEN are set, so every estate that runs it knows
+# the same facts. `fields` and `relations` place it in the house's platform
+# pillars (plat_pillar); an API key is the providing service's key and its id.
 service: github/dsswift/redgreen
-category: Delivery outcomes
-domains:
-- platform/outcomes
-- platform/catalog
+fields:
+  category: Delivery outcomes
+relations:
+  pillars:
+  - platform/outcomes
+  - platform/catalog
 consumes:
 - github/dsswift/dispatch/cmd/dispatch/incidents
 - github/dsswift/orrery/catalog

@@ -33,11 +33,22 @@ const repo: RepoSnapshot = {
   syncedAt: '2026-09-30T00:00:00Z',
 }
 
+describe('offered blueprints', () => {
+  it('carry the standard ids and take over the old ones', () => {
+    expect([REPOSITORY_BLUEPRINT, SERVICE_BLUEPRINT, DEPLOYMENT_BLUEPRINT].map((b) => [b.id, b.formerly])).toEqual([
+      ['sw_repository', ['repository']],
+      ['sw_service', ['service']],
+      ['sw_deployment', ['deployment']],
+    ])
+    expect([SERVICE_BLUEPRINT.relations.repository.target, DEPLOYMENT_BLUEPRINT.relations.repository.target]).toEqual(['sw_repository', 'sw_repository'])
+  })
+})
+
 describe('toRepository', () => {
   it('shapes a repo into a repository entity', () => {
     const health = { level: 'red', quietReason: null, signals: [{ rule: 'default_branch_failing', severity: 'red', title: 'ci is failing on main', detail: '', since: null, sinceIsLowerBound: false, url: null, pipelineId: 'p' }], running: false, successRate: 0.66, lastRunAt: null } as unknown as RepoHealth
     const s = toRepository(repo, { login: 'Example' }, health, 'https://board/repos/github%3A1', Date.parse('2026-09-30T00:00:00Z'))
-    expect(s.blueprint).toBe('repository')
+    expect(s.blueprint).toBe('sw_repository')
     expect(s.key).toBe('github/example/payments')
     expect(s.title).toBe('Payments')
     expect(s.fields).toMatchObject({ language: 'Go', organization: 'Example', pipelines_failing: 1, workflow_failure_rate: 33, stale_prs: 1, last_release: 'v1.2.0', dependabot_critical: 1, code_scanning_critical: null, health: 'red', health_reason: 'ci is failing on main', branch_protected: true, required_approvals: 2, has_ci: true, last_committer: 'dev', last_committer_email: 'dev@example.com' })
@@ -74,7 +85,7 @@ describe('toDeployments', () => {
   it('shapes each finished deployment and points it at its repository', () => {
     const out = toDeployments({ ...repo, deployments: [deployment('7', 'succeeded', '2026-09-20T10:01:30Z'), deployment('8', 'failed', '2026-09-21T10:00:10Z'), deployment('9', 'running', null), deployment('10', 'other', null)] })
     expect(out.map((d) => d.key)).toEqual(['github/example/payments/7', 'github/example/payments/8'])
-    expect(out[0]).toMatchObject({ blueprint: 'deployment', title: 'Payments to production', relations: { repository: 'github/example/payments' }, fields: { status: 'succeeded', environment_name: 'production', revision: 'abc', deployed_at: '2026-09-20T10:01:30Z', duration_seconds: 90, initiated_by: 'dev' } })
+    expect(out[0]).toMatchObject({ blueprint: 'sw_deployment', title: 'Payments to production', relations: { repository: 'github/example/payments' }, fields: { status: 'succeeded', environment_name: 'production', revision: 'abc', deployed_at: '2026-09-20T10:01:30Z', duration_seconds: 90, initiated_by: 'dev' } })
     expect(Object.keys(out[0]!.fields).filter((f) => !(f in DEPLOYMENT_BLUEPRINT.fields))).toEqual([])
   })
 
@@ -103,7 +114,7 @@ describe('toServices', () => {
       ['github/example/payments/web/checkout', 'typescript'],
       ['github/example/payments/deploy', undefined],
     ])
-    expect(out[1]).toMatchObject({ blueprint: 'service', title: 'checkout', fields: { path: 'web/Checkout', type: 'frontend', language: 'TypeScript', last_changed_at: '2026-10-01T09:00:00Z', last_changed_by: 'release-damnit', last_changed_by_email: 'release@example.com', last_human_changed_at: '2026-09-30T09:00:00Z', last_human_changed_by: 'a-developer', last_human_changed_by_email: 'dev@example.com' }, relations: { repository: 'github/example/payments' } })
+    expect(out[1]).toMatchObject({ blueprint: 'sw_service', title: 'checkout', fields: { path: 'web/Checkout', type: 'frontend', language: 'TypeScript', last_changed_at: '2026-10-01T09:00:00Z', last_changed_by: 'release-damnit', last_changed_by_email: 'release@example.com', last_human_changed_at: '2026-09-30T09:00:00Z', last_human_changed_by: 'a-developer', last_human_changed_by_email: 'dev@example.com' }, relations: { repository: 'github/example/payments' } })
     for (const s of out) expect(Object.keys(s.fields).filter((f) => !(f in SERVICE_BLUEPRINT.fields))).toEqual([])
   })
 
