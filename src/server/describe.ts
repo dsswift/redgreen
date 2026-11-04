@@ -208,17 +208,17 @@ export class Describer {
   }
 
   private async describe(): Promise<void> {
-    const offered = (await this.call('PUT', '/ingest/blueprints', { blueprints: DESCRIBE_BLUEPRINTS })) as { created?: string[]; extended?: string[]; rejected?: { blueprint: string; reason: string }[] } | null
+    const offered = (await this.call('PUT', '/v1/ingest/blueprints', { blueprints: DESCRIBE_BLUEPRINTS })) as { created?: string[]; extended?: string[]; rejected?: { blueprint: string; reason: string }[] } | null
     const refused = offered?.rejected ?? []
     if (refused.length) throw new Error(`orrery: ${refused.length} blueprint(s) refused, first: ${refused[0]?.blueprint}: ${refused[0]?.reason}`)
     // The logo goes first, so the service never names an icon the hub lacks. The same bytes again change nothing there.
     if (this.desc.icon) {
       const image = this.desc.image
       if (!image) throw new Error(`orrery.yaml: icon file "${this.desc.icon.file}" was not read`)
-      await this.send('PUT', `/api/icons/${encodeURIComponent(image.name)}`, image.type, Buffer.from(image.data))
+      await this.send('PUT', `/v1/icons/${encodeURIComponent(image.name)}`, image.type, Buffer.from(image.data))
     }
     for (const w of describeWrites(this.desc)) {
-      await this.call(w.method, `/ingest/entities/${encodeURIComponent(w.blueprint)}/${encodeURIComponent(w.key)}`, w.body)
+      await this.call(w.method, `/v1/ingest/entities/${encodeURIComponent(w.blueprint)}/${encodeURIComponent(w.key)}`, w.body)
     }
   }
 

@@ -74,9 +74,9 @@ describe('Describer', () => {
     expect(await r.once()).toBe(true)
     expect(outcomes).toEqual(['ok'])
     expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
-      'PUT https://hub/ingest/blueprints',
-      'PATCH https://hub/ingest/entities/sw_service/github%2Fexample%2Fapp',
-      'PUT https://hub/ingest/entities/sw_api/github%2Fexample%2Fapp%2Frest',
+      'PUT https://hub/v1/ingest/blueprints',
+      'PATCH https://hub/v1/ingest/entities/sw_service/github%2Fexample%2Fapp',
+      'PUT https://hub/v1/ingest/entities/sw_api/github%2Fexample%2Fapp%2Frest',
     ])
     expect(calls.every((c) => c.auth === 'Bearer push')).toBe(true)
     expect(calls[0]?.body).toEqual({ blueprints: DESCRIBE_BLUEPRINTS })
@@ -90,7 +90,7 @@ describe('Describer', () => {
     const d = parseDescriptor('service: github/example/app\nicon: {name: app, file: logo.svg}\n')
     const r = new Describer({ ORRERY_URL: 'https://hub', ORRERY_PUSH_TOKEN: 'push' }, { ...d, image: iconFile(d.icon!, svg) }, { described() {} }, silent, { fetch: fake })
     expect(await r.once()).toBe(true)
-    expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual(['PUT https://hub/ingest/blueprints', 'PUT https://hub/api/icons/app', 'PATCH https://hub/ingest/entities/sw_service/github%2Fexample%2Fapp'])
+    expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual(['PUT https://hub/v1/ingest/blueprints', 'PUT https://hub/v1/icons/app', 'PATCH https://hub/v1/ingest/entities/sw_service/github%2Fexample%2Fapp'])
     expect(calls[1]?.body).toEqual({ type: 'image/svg+xml', bytes: svg.byteLength })
     expect(calls[2]?.body).toMatchObject({ icon: 'app' })
   })

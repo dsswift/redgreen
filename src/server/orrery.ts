@@ -398,7 +398,7 @@ export class OrreryPusher {
   private async offer(): Promise<boolean> {
     if (this.offered) return true
     try {
-      const res = (await this.call('PUT', '/ingest/blueprints', { blueprints: [REPOSITORY_BLUEPRINT, SERVICE_BLUEPRINT, DEPLOYMENT_BLUEPRINT] })) as { created?: string[]; extended?: string[]; rejected?: { blueprint: string; reason: string }[] }
+      const res = (await this.call('PUT', '/v1/ingest/blueprints', { blueprints: [REPOSITORY_BLUEPRINT, SERVICE_BLUEPRINT, DEPLOYMENT_BLUEPRINT] })) as { created?: string[]; extended?: string[]; rejected?: { blueprint: string; reason: string }[] }
       // Repositories are the point; a hub that will not take deployments still gets them.
       const refused = res.rejected?.find((r) => r.blueprint === 'sw_repository')
       if (refused) {
@@ -412,7 +412,7 @@ export class OrreryPusher {
       this.deployments = !deployments
       if (deployments) this.log.warn('orrery refused the deployment blueprint; deployments are not pushed', { reason: deployments.reason })
       else {
-        const counted = (await this.call('PUT', '/ingest/blueprints', { blueprints: [REPOSITORY_DEPLOYMENT_FIELDS] })) as { rejected?: { reason: string }[] }
+        const counted = (await this.call('PUT', '/v1/ingest/blueprints', { blueprints: [REPOSITORY_DEPLOYMENT_FIELDS] })) as { rejected?: { reason: string }[] }
         if (counted.rejected?.length) this.log.warn('orrery refused the deployment counts on repository; deployments are pushed without them', { reason: counted.rejected[0]?.reason })
       }
       this.offered = true
@@ -437,8 +437,8 @@ export class OrreryPusher {
       return { service: icon.service, icon: icon.name }
     }
     try {
-      const res = await fetch(`${this.url}/api/icons/${encodeURIComponent(icon.name)}`, { method: 'PUT', headers: { authorization: `Bearer ${this.token}`, 'content-type': icon.type }, body: Buffer.from(icon.data), signal: AbortSignal.timeout(60_000) })
-      if (!res.ok) throw new Error(`orrery PUT /api/icons/${icon.name}: ${res.status} ${(await res.text()).slice(0, 300)}`)
+      const res = await fetch(`${this.url}/v1/icons/${encodeURIComponent(icon.name)}`, { method: 'PUT', headers: { authorization: `Bearer ${this.token}`, 'content-type': icon.type }, body: Buffer.from(icon.data), signal: AbortSignal.timeout(60_000) })
+      if (!res.ok) throw new Error(`orrery PUT /v1/icons/${icon.name}: ${res.status} ${(await res.text()).slice(0, 300)}`)
       this.store.setRepoIconUploaded(repoId, icon.sha256)
       this.log.info('orrery icon put', { service: icon.service, icon: icon.name, type: icon.type, bytes: icon.data.byteLength, sha256: icon.sha256 })
       return { service: icon.service, icon: icon.name }
@@ -458,9 +458,9 @@ export class OrreryPusher {
     const entity = toRepository(row.snapshot, account, this.estate.healthOf(row), this.boardUrl(row.id), Date.now(), measures)
     try {
       const scope = `${account.provider}/${account.login}`.toLowerCase()
-      await this.call('PATCH', `/ingest/entities/sw_repository/${encodeURIComponent(entity.key)}`, { title: entity.title, fields: entity.fields, scope })
+      await this.call('PATCH', `/v1/ingest/entities/sw_repository/${encodeURIComponent(entity.key)}`, { title: entity.title, fields: entity.fields, scope })
       const services = this.services ? toServices(row.snapshot, measures, await this.logo(row.id)) : []
-      for (const s of services) await this.call('PATCH', `/ingest/entities/sw_service/${encodeURIComponent(s.key)}`, { title: s.title, ...(s.icon ? { icon: s.icon } : {}), fields: s.fields, relations: s.relations, scope: `${scope}/services` })
+      for (const s of services) await this.call('PATCH', `/v1/ingest/entities/sw_service/${encodeURIComponent(s.key)}`, { title: s.title, ...(s.icon ? { icon: s.icon } : {}), fields: s.fields, relations: s.relations, scope: `${scope}/services` })
       this.log.debug('orrery repo pushed', { repo: row.fullName, services: services.length })
     } catch (error) {
       this.log.warn('orrery repo push failed', { repo: row.fullName, error })
@@ -496,16 +496,16 @@ export class OrreryPusher {
 
   /** One run of entities in batches, committed. Answers how many the hub rejected. */
   private async run(mode: 'snapshot' | 'incremental', scope: string, entities: (RepositoryEntity | ServiceEntity | DeploymentEntity)[], kind: string): Promise<number> {
-    const run = (await this.call('POST', '/ingest/runs', { mode, scope })) as { id: string }
+    const run = (await this.call('POST', '/v1/ingest/runs', { mode, scope })) as { id: string }
     let rejected = 0
     for (let i = 0; i < entities.length; i += 100) {
-      const res = (await this.call('PUT', `/ingest/runs/${encodeURIComponent(run.id)}/entities`, { entities: entities.slice(i, i + 100) })) as { rejected?: { key?: string; field?: string; reason: string }[] }
+      const res = (await this.call('PUT', `/v1/ingest/runs/${encodeURIComponent(run.id)}/entities`, { entities: entities.slice(i, i + 100) })) as { rejected?: { key?: string; field?: string; reason: string }[] }
       for (const r of res.rejected ?? []) {
         rejected++
         this.log.warn(`orrery rejected a ${kind}`, { key: r.key, field: r.field, reason: r.reason })
       }
     }
-    await this.call('POST', `/ingest/runs/${encodeURIComponent(run.id)}/commit`)
+    await this.call('POST', `/v1/ingest/runs/${encodeURIComponent(run.id)}/commit`)
     return rejected
   }
 

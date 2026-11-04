@@ -30,7 +30,7 @@ Estate health board. Read `README.md` first.
 - `server/describe.ts` writes redgreen's own description from the root
   `orrery.yaml` when `ORRERY_URL` and `ORRERY_PUSH_TOKEN` are set. It reads
   only `ORRERY_PUSH_TOKEN`. The image must carry `orrery.yaml` and the logo
-  its `icon` names (`logo.svg`); the logo is put with `PUT /api/icons/{name}`
+  its `icon` names (`logo.svg`); the logo is put with `PUT /v1/icons/{name}`
   before the service that wears it.
 - `server/icons.ts` checks a logo the way the hub checks a custom icon, for
   both writers. `readLogo` in `server/services.ts` reads the logo a repo's

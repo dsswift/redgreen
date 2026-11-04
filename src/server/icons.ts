@@ -1,6 +1,6 @@
 // A logo an app names in its own orrery.yaml (`icon: {name, file}`), checked
 // the way the hub checks a custom icon before it is put there with
-// `PUT /api/icons/{name}`. Both writers use it: the describer for redgreen's
+// `PUT /v1/icons/{name}`. Both writers use it: the describer for redgreen's
 // own logo, and the pusher for the logo of every repository it watches. Pure,
 // so it is tested without a hub.
 

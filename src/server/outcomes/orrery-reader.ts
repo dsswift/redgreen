@@ -153,7 +153,7 @@ export class OrreryReader {
   private async entities<T>(blueprint: string, query = ''): Promise<T[]> {
     const all: T[] = []
     for (let offset = 0; ; offset += PAGE) {
-      const page = await this.get<{ entities: T[]; total: number }>(`/api/entities?blueprint=${blueprint}&limit=${PAGE}&offset=${offset}${query}`)
+      const page = await this.get<{ entities: T[]; total: number }>(`/v1/entities?blueprint=${blueprint}&limit=${PAGE}&offset=${offset}${query}`)
       all.push(...page.entities)
       if (all.length >= page.total || page.entities.length === 0) return all
     }
