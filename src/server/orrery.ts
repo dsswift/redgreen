@@ -227,14 +227,26 @@ export const DEPLOYMENT_BLUEPRINT = {
 
 const repositoryKey = (repo: Pick<RepoSnapshot, 'provider' | 'fullName'>) => `${repo.provider}/${repo.fullName}`.toLowerCase()
 
-/** Every service found in a repo, pointing at its repository. Empty when the services could not be read. Pure, so it is tested without a hub. */
-export function toServices(repo: RepoSnapshot, measures: RepoMeasures | null = null): ServiceEntity[] {
+/**
+ * The logo a repository's orrery.yaml names for one of its services. `icon`
+ * is the name once the hub holds it, and null when the upload failed: that
+ * service is written without an icon, so the hub keeps the one it has.
+ */
+export interface ServiceLogo {
+  service: string
+  icon: string | null
+}
+
+/** Every service found in a repo, pointing at its repository. Empty when the services could not be read. A service the repo's logo names wears it instead of its language. Pure, so it is tested without a hub. */
+export function toServices(repo: RepoSnapshot, measures: RepoMeasures | null = null, logo: ServiceLogo | null = null): ServiceEntity[] {
   const key = repositoryKey(repo)
   return (repo.services?.services ?? []).map((s) => {
-    const icon = s.language ? LANGUAGE_ICONS[s.language] : undefined
+    const serviceKey = s.id ? `${key}/${s.id.toLowerCase()}` : key
+    const named = logo?.service.toLowerCase() === serviceKey
+    const icon = named ? (logo.icon ?? undefined) : s.language ? LANGUAGE_ICONS[s.language] : undefined
     return {
       blueprint: 'sw_service',
-      key: s.id ? `${key}/${s.id.toLowerCase()}` : key,
+      key: serviceKey,
       title: s.name,
       ...(icon ? { icon } : {}),
       fields: { path: s.path, type: s.type, language: s.language, last_changed_at: s.changedAt ?? null, last_changed_by: s.changedBy ?? null, last_changed_by_email: s.changedByEmail ?? null, last_human_changed_at: s.humanChangedAt ?? null, last_human_changed_by: s.humanChangedBy ?? null, last_human_changed_by_email: s.humanChangedByEmail ?? null, has_readme: s.files?.readme ?? null, has_dockerfile: s.files?.dockerfile ?? null, has_tests: s.files?.tests ?? null, ...doraFields(measures?.services.get(s.path) ?? null) },
@@ -412,6 +424,30 @@ export class OrreryPusher {
     }
   }
 
+  /**
+   * The logo a repo's orrery.yaml names, put on the hub when its bytes
+   * changed since the last put. A failed put is logged and answers a logo
+   * with no icon, so the service keeps whatever icon the hub has.
+   */
+  private async logo(repoId: string): Promise<ServiceLogo | null> {
+    const icon = this.store.getRepoIcon(repoId)
+    if (!icon) return null
+    if (icon.uploadedSha256 === icon.sha256) {
+      this.log.debug('orrery icon unchanged; not put again', { service: icon.service, icon: icon.name })
+      return { service: icon.service, icon: icon.name }
+    }
+    try {
+      const res = await fetch(`${this.url}/api/icons/${encodeURIComponent(icon.name)}`, { method: 'PUT', headers: { authorization: `Bearer ${this.token}`, 'content-type': icon.type }, body: Buffer.from(icon.data), signal: AbortSignal.timeout(60_000) })
+      if (!res.ok) throw new Error(`orrery PUT /api/icons/${icon.name}: ${res.status} ${(await res.text()).slice(0, 300)}`)
+      this.store.setRepoIconUploaded(repoId, icon.sha256)
+      this.log.info('orrery icon put', { service: icon.service, icon: icon.name, type: icon.type, bytes: icon.data.byteLength, sha256: icon.sha256 })
+      return { service: icon.service, icon: icon.name }
+    } catch (error) {
+      this.log.warn('orrery icon put failed; the service is written without an icon', { service: icon.service, icon: icon.name, error })
+      return { service: icon.service, icon: null }
+    }
+  }
+
   /** One repo, right after it synced. Merges fields; never deletes. */
   async pushRepo(repoId: string): Promise<void> {
     const row = this.store.getRepo(repoId)
@@ -423,7 +459,7 @@ export class OrreryPusher {
     try {
       const scope = `${account.provider}/${account.login}`.toLowerCase()
       await this.call('PATCH', `/ingest/entities/sw_repository/${encodeURIComponent(entity.key)}`, { title: entity.title, fields: entity.fields, scope })
-      const services = this.services ? toServices(row.snapshot, measures) : []
+      const services = this.services ? toServices(row.snapshot, measures, await this.logo(row.id)) : []
       for (const s of services) await this.call('PATCH', `/ingest/entities/sw_service/${encodeURIComponent(s.key)}`, { title: s.title, ...(s.icon ? { icon: s.icon } : {}), fields: s.fields, relations: s.relations, scope: `${scope}/services` })
       this.log.debug('orrery repo pushed', { repo: row.fullName, services: services.length })
     } catch (error) {
@@ -448,7 +484,9 @@ export class OrreryPusher {
         const entities = synced.map((r) => toRepository(r.snapshot!, account, this.estate.healthOf(r), this.boardUrl(r.id), Date.now(), measures.get(r.id) ?? null))
         const rejected = await this.run(mode, scope, entities, 'repository')
         this.log.info('orrery push done', { reason, account: account.login, mode, repositories: entities.length, unsynced: mine.length - synced.length, rejected })
-        await this.pushServices(account.login, scope, mode, synced.map((r) => [r.snapshot!, measures.get(r.id) ?? null]))
+        const services: [RepoSnapshot, RepoMeasures | null, ServiceLogo | null][] = []
+        for (const r of synced) services.push([r.snapshot!, measures.get(r.id) ?? null, this.services ? await this.logo(r.id) : null])
+        await this.pushServices(account.login, scope, mode, services)
         await this.pushDeployments(account.login, scope, synced.flatMap((r) => toDeployments(r.snapshot!)))
       } catch (error) {
         this.log.error('orrery push failed', { reason, account: account.login, error })
@@ -472,7 +510,7 @@ export class OrreryPusher {
   }
 
   /** A snapshot only when every repo's services were read, so a service is never dropped because its repo could not be. */
-  private async pushServices(account: string, scope: string, repoMode: 'snapshot' | 'incremental', snapshots: [RepoSnapshot, RepoMeasures | null][]): Promise<void> {
+  private async pushServices(account: string, scope: string, repoMode: 'snapshot' | 'incremental', snapshots: [RepoSnapshot, RepoMeasures | null, ServiceLogo | null][]): Promise<void> {
     if (!this.services) {
       this.log.debug('no services pushed; the hub refused the blueprint', { account })
       return
@@ -480,7 +518,7 @@ export class OrreryPusher {
     const unread = snapshots.filter(([s]) => !s.services).length
     const mode = repoMode === 'snapshot' && unread === 0 ? 'snapshot' : 'incremental'
     if (mode === 'incremental') this.log.info('services pushed without deleting; some repos are unread', { account, unread })
-    const entities = snapshots.flatMap(([s, m]) => toServices(s, m))
+    const entities = snapshots.flatMap(([s, m, l]) => toServices(s, m, l))
     const rejected = await this.run(mode, `${scope}/services`, entities, 'service')
     this.log.info('orrery services pushed', { account, mode, services: entities.length, rejected })
   }

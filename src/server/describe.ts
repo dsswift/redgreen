@@ -1,5 +1,6 @@
 // Describes redgreen itself to the Orrery it runs beside, from the
-// orrery.yaml at the repository root: the service it is, the fields and
+// orrery.yaml at the repository root: its logo, put as a custom icon and
+// worn by its service, the service it is, the fields and
 // relations that place it in the estate's own scheme, the APIs it provides,
 // and the APIs it calls. On when ORRERY_URL and
 // ORRERY_PUSH_TOKEN are both set. The service is patched, so the fields other
@@ -8,10 +9,11 @@
 // wait, and every six hours so the catalog keeps seeing it.
 
 import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import { parse } from 'yaml'
 import { z } from 'zod'
 import type { Config } from './config.ts'
+import { ICON_NAME, iconFile, iconType, type IconFile } from './icons.ts'
 import type { Logger } from './log.ts'
 import type { Telemetry } from './telemetry.ts'
 
@@ -31,6 +33,8 @@ const NAME = /^[a-z][a-z0-9_]*$/
 
 const descriptor = z.strictObject({
   service: z.string().default(''),
+  /** The app's logo: a custom icon name and the file, from the repository root, that holds it. */
+  icon: z.strictObject({ name: z.string().regex(ICON_NAME), file: z.string().min(1) }).nullish().transform((v) => v ?? null),
   /** Fields and relations that place the service in one estate's own scheme. The estate defines them; left out, they are never written. */
   fields: z.record(z.string().regex(NAME), z.unknown()).nullish().transform((v) => v ?? {}),
   relations: z.record(z.string().regex(NAME), z.union([z.string().min(1), z.array(z.string().min(1))])).nullish().transform((v) => v ?? {}),
@@ -41,12 +45,16 @@ const descriptor = z.strictObject({
 
 export type Descriptor = z.output<typeof descriptor>
 
+/** A description with the bytes of the logo it names, read from beside the file. */
+export type Described = Descriptor & { image?: IconFile }
+
 /** Reads an orrery.yaml and refuses one the hub would refuse. */
 export function parseDescriptor(text: string): Descriptor {
   const parsed = descriptor.safeParse(parse(text) ?? {})
   if (!parsed.success) throw new Error(`orrery.yaml: ${z.prettifyError(parsed.error)}`)
   const d = parsed.data
   if (!d.service) throw new Error('orrery.yaml: service is required')
+  if (d.icon && !iconType(d.icon.file)) throw new Error(`orrery.yaml: icon file "${d.icon.file}" is not .svg, .png, or .webp`)
   const seen = new Set<string>()
   d.provides.forEach((a, i) => {
     if (!a.id || !a.title) throw new Error(`orrery.yaml: provides[${i}] needs an id and a title`)
@@ -61,12 +69,12 @@ export interface DescribeWrite {
   method: 'PATCH' | 'PUT'
   blueprint: 'sw_service' | 'sw_api'
   key: string
-  body: { title?: string; fields: Record<string, unknown>; relations: Record<string, unknown> }
+  body: { title?: string; icon?: string; fields: Record<string, unknown>; relations: Record<string, unknown> }
 }
 
 /**
- * The writes that describe the app: its service, patched, then one api per
- * provided API. An empty list is written as an empty list, so a connector
+ * The writes that describe the app: its service, patched and wearing its
+ * logo when it names one, then one api per provided API. An empty list is written as an empty list, so a connector
  * removed from the file is removed from the catalog.
  */
 export function describeWrites(d: Descriptor): DescribeWrite[] {
@@ -75,7 +83,7 @@ export function describeWrites(d: Descriptor): DescribeWrite[] {
       method: 'PATCH',
       blueprint: 'sw_service',
       key: d.service,
-      body: { fields: { ...d.fields, origin: 'built' }, relations: { ...d.relations, consumes: d.consumes, will_consume: d.will_consume } },
+      body: { ...(d.icon ? { icon: d.icon.name } : {}), fields: { ...d.fields, origin: 'built' }, relations: { ...d.relations, consumes: d.consumes, will_consume: d.will_consume } },
     },
     ...d.provides.map((a): DescribeWrite => ({
       method: 'PUT',
@@ -134,7 +142,7 @@ export interface DescriberOptions {
 export class Describer {
   private readonly url: string
   private readonly token: string
-  private readonly desc: Descriptor
+  private readonly desc: Described
   private readonly telemetry: Pick<Telemetry, 'described'>
   private readonly log: Logger
   private readonly fetch: typeof fetch
@@ -144,7 +152,7 @@ export class Describer {
   private timer: NodeJS.Timeout | null = null
   private failures = 0
 
-  constructor(config: Pick<Config, 'ORRERY_URL' | 'ORRERY_PUSH_TOKEN'>, desc: Descriptor, telemetry: Pick<Telemetry, 'described'>, log: Logger, options: DescriberOptions = {}) {
+  constructor(config: Pick<Config, 'ORRERY_URL' | 'ORRERY_PUSH_TOKEN'>, desc: Described, telemetry: Pick<Telemetry, 'described'>, log: Logger, options: DescriberOptions = {}) {
     this.url = (config.ORRERY_URL ?? '').replace(/\/$/, '')
     this.token = config.ORRERY_PUSH_TOKEN ?? ''
     this.desc = desc
@@ -188,7 +196,7 @@ export class Describer {
   async once(): Promise<boolean> {
     try {
       await this.describe()
-      this.log.info('orrery described', { service: this.desc.service, apis: this.desc.provides.length, consumes: this.desc.consumes.length, will_consume: this.desc.will_consume.length })
+      this.log.info('orrery described', { service: this.desc.service, icon: this.desc.icon?.name ?? null, apis: this.desc.provides.length, consumes: this.desc.consumes.length, will_consume: this.desc.will_consume.length })
       this.telemetry.described('ok')
       return true
     } catch (error) {
@@ -203,21 +211,33 @@ export class Describer {
     const offered = (await this.call('PUT', '/ingest/blueprints', { blueprints: DESCRIBE_BLUEPRINTS })) as { created?: string[]; extended?: string[]; rejected?: { blueprint: string; reason: string }[] } | null
     const refused = offered?.rejected ?? []
     if (refused.length) throw new Error(`orrery: ${refused.length} blueprint(s) refused, first: ${refused[0]?.blueprint}: ${refused[0]?.reason}`)
+    // The logo goes first, so the service never names an icon the hub lacks. The same bytes again change nothing there.
+    if (this.desc.icon) {
+      const image = this.desc.image
+      if (!image) throw new Error(`orrery.yaml: icon file "${this.desc.icon.file}" was not read`)
+      await this.send('PUT', `/api/icons/${encodeURIComponent(image.name)}`, image.type, Buffer.from(image.data))
+    }
     for (const w of describeWrites(this.desc)) {
       await this.call(w.method, `/ingest/entities/${encodeURIComponent(w.blueprint)}/${encodeURIComponent(w.key)}`, w.body)
     }
   }
 
-  private async call(method: string, path: string, body: unknown): Promise<unknown> {
+  private call(method: string, path: string, body: unknown): Promise<unknown> {
+    return this.send(method, path, 'application/json', JSON.stringify(body))
+  }
+
+  private async send(method: string, path: string, type: string, body: BodyInit): Promise<unknown> {
     const signal = AbortSignal.any([this.abort.signal, AbortSignal.timeout(TIMEOUT_MS)])
-    const res = await this.fetch(this.url + path, { method, headers: { authorization: `Bearer ${this.token}`, 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify(body), signal })
+    const res = await this.fetch(this.url + path, { method, headers: { authorization: `Bearer ${this.token}`, 'content-type': type, accept: 'application/json' }, body, signal })
     const text = await res.text()
     if (!res.ok) throw new Error(`orrery ${method} ${path}: ${res.status} ${text.slice(0, 300)}`)
     return text ? JSON.parse(text) : null
   }
 }
 
-/** Reads the description beside the app. */
-export function loadDescriptor(path = DESCRIPTOR_PATH): Descriptor {
-  return parseDescriptor(readFileSync(path, 'utf8'))
+/** Reads the description beside the app, and the logo it names from the same folder. */
+export function loadDescriptor(path = DESCRIPTOR_PATH): Described {
+  const d = parseDescriptor(readFileSync(path, 'utf8'))
+  if (!d.icon) return d
+  return { ...d, image: iconFile(d.icon, readFileSync(resolve(dirname(path), d.icon.file))) }
 }

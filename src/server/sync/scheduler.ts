@@ -231,9 +231,15 @@ export class Scheduler {
   private async services(provider: Provider, account: AccountRow, snapshot: RepoSnapshot, previous: RepoServices | null | undefined): Promise<RepoServices | null> {
     const repoName = snapshot.fullName.slice(snapshot.fullName.lastIndexOf('/') + 1)
     try {
-      const { services, reused, read } = await readServices(await provider.files(account, snapshot), repoName, previous)
+      const { services, reused, read, icon } = await readServices(await provider.files(account, snapshot), repoName, previous)
       if (reused) this.log.debug('services unchanged; the default branch has not moved', { repo: snapshot.fullName, services: services.services.length })
       else this.log.info('services read', { repo: snapshot.fullName, commit: services.commit, services: services.services.length, filesRead: read })
+      if (icon) {
+        this.store.setRepoIcon(snapshot.id, icon.icon)
+        if (icon.icon) this.log.info('repo names its logo', { repo: snapshot.fullName, service: icon.icon.service, icon: icon.icon.name, bytes: icon.icon.data.byteLength })
+        else if (icon.problem) this.log.warn('repo names a logo that cannot be used; its services wear their language', { repo: snapshot.fullName, problem: icon.problem })
+        else this.log.debug('repo names no logo; its services wear their language', { repo: snapshot.fullName })
+      }
       if (read > READ_BUDGET) this.log.warn('read budget spent; services found so far stand', { repo: snapshot.fullName, budget: READ_BUDGET })
       return services
     } catch (error) {

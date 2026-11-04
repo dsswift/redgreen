@@ -15,16 +15,23 @@ export async function azureDevopsFiles(client: AzureDevopsClient, org: string, r
   }
   if (!commit) return null
   const at = { 'versionDescriptor.version': commit, 'versionDescriptor.versionType': 'commit' }
+  /** A binary file's content comes base64 encoded, and says so in its metadata. */
+  const item = async (path: string) => {
+    try {
+      return await client.get<{ content?: string; contentMetadata?: { isBinary?: boolean } }>(`${git}/items`, { path: `/${path}`, includeContent: true, $format: 'json', ...at })
+    } catch (error) {
+      if (isStatus(error, 404)) return null
+      throw error
+    }
+  }
   return {
     commit,
     list: async () => (await client.list<{ path: string; isFolder?: boolean }>(`${git}/items`, { scopePath: '/', recursionLevel: 'Full', ...at })).filter((i) => !i.isFolder).map((i) => i.path.replace(/^\//, '')),
-    read: async (path) => {
-      try {
-        return (await client.get<{ content?: string }>(`${git}/items`, { path: `/${path}`, includeContent: true, $format: 'json', ...at })).content ?? null
-      } catch (error) {
-        if (isStatus(error, 404)) return null
-        throw error
-      }
+    read: async (path) => (await item(path))?.content ?? null,
+    bytes: async (path) => {
+      const found = await item(path)
+      if (found?.content === undefined) return null
+      return Buffer.from(found.content, found.contentMetadata?.isBinary ? 'base64' : 'utf8')
     },
     lastChange: async (path) => {
       const found = await client.get<{ value: { committer?: { date?: string }; author?: { name?: string; email?: string } }[] }>(`${git}/commits`, { 'searchCriteria.itemVersion.version': commit, 'searchCriteria.itemVersion.versionType': 'commit', 'searchCriteria.itemPath': `/${path}`, 'searchCriteria.$top': HUMAN_LOOKBACK })

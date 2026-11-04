@@ -1,9 +1,12 @@
 # What this app is, for the Orrery it runs beside. At start the app writes
-# its own service, the APIs it provides, and the APIs it calls, when
-# ORRERY_URL and ORRERY_PUSH_TOKEN are set, so every estate that runs it knows
-# the same facts. `fields` and `relations` place it in the house's platform
+# its logo as a custom icon, its own service, the APIs it provides, and the
+# APIs it calls, when ORRERY_URL and ORRERY_PUSH_TOKEN are set, so every
+# estate that runs it knows the same facts. `fields` and `relations` place it in the house's platform
 # pillars (plat_pillar); an API key is the providing service's key and its id.
 service: github/dsswift/redgreen
+icon:
+  name: redgreen
+  file: logo.svg
 fields:
   category: Delivery outcomes
 relations:

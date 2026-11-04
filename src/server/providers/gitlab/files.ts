@@ -11,18 +11,20 @@ export async function gitlabFiles(client: GitlabClient, projectId: number, branc
     if (isStatus(error, 404)) return null
     throw error
   }
+  const file = async (path: string): Promise<Buffer | null> => {
+    try {
+      const found = await client.get<{ content: string; encoding: string }>(`projects/${projectId}/repository/files/${encodeURIComponent(path)}`, { ref: commit })
+      return Buffer.from(found.content, found.encoding === 'base64' ? 'base64' : 'utf8')
+    } catch (error) {
+      if (isStatus(error, 404)) return null
+      throw error
+    }
+  }
   return {
     commit,
     list: async () => (await client.paginate<{ path: string; type: string }>(`projects/${projectId}/repository/tree`, { ref: commit, recursive: true })).filter((i) => i.type === 'blob').map((i) => i.path),
-    read: async (path) => {
-      try {
-        const file = await client.get<{ content: string; encoding: string }>(`projects/${projectId}/repository/files/${encodeURIComponent(path)}`, { ref: commit })
-        return file.encoding === 'base64' ? Buffer.from(file.content, 'base64').toString('utf8') : file.content
-      } catch (error) {
-        if (isStatus(error, 404)) return null
-        throw error
-      }
-    },
+    read: async (path) => (await file(path))?.toString('utf8') ?? null,
+    bytes: file,
     lastChange: async (path) => {
       const list = await client.get<{ committed_date?: string | null; author_name?: string | null; author_email?: string | null; committer_name?: string | null }[]>(`projects/${projectId}/repository/commits`, { ref_name: commit, per_page: HUMAN_LOOKBACK, ...(path ? { path } : {}) })
       return lastChangeOf(list.map((c) => ({ at: c.committed_date ?? null, by: c.author_name ?? c.committer_name ?? null, email: c.author_email ?? null })))

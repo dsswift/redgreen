@@ -126,6 +126,18 @@ describe('toServices', () => {
     for (const s of out) expect(Object.keys(s.fields).filter((f) => !(f in SERVICE_BLUEPRINT.fields))).toEqual([])
   })
 
+  it('wears the logo its orrery.yaml names on that service alone, and no icon when the put failed', () => {
+    const services = { commit: 'c', rules: 1, services: [{ id: '', path: '', name: 'root', type: 'backend' as const, language: 'Go' as const }, { id: 'web', path: 'web', name: 'web', type: 'frontend' as const, language: 'TypeScript' as const }] }
+    const named = toServices({ ...repo, services }, null, { service: 'GitHub/Example/Payments', icon: 'payments' })
+    expect(named.map((s) => [s.key, s.icon])).toEqual([
+      ['github/example/payments', 'payments'],
+      ['github/example/payments/web', 'typescript'],
+    ])
+    const failed = toServices({ ...repo, services }, null, { service: 'github/example/payments', icon: null })
+    expect(failed[0]).not.toHaveProperty('icon')
+    expect(failed[1]?.icon).toBe('typescript')
+  })
+
   it('has nothing to say for a repo whose services were not read', () => {
     expect(toServices({ ...repo, services: null })).toEqual([])
     expect(toServices(repo)).toEqual([])

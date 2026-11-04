@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DESCRIBE_BLUEPRINTS, Describer, loadDescriptor, parseDescriptor } from './describe.ts'
+import { iconFile } from './icons.ts'
 import type { Logger } from './log.ts'
 
 const silent: Logger = { debug() {}, info() {}, warn() {}, error() {}, child: () => silent }
@@ -22,6 +23,14 @@ describe('parseDescriptor', () => {
     expect(d.service).toBe('github/dsswift/redgreen')
     expect(d.relations).toEqual({ pillars: ['platform/outcomes', 'platform/catalog'] })
     expect(d.fields).toEqual({ category: 'Delivery outcomes' })
+    expect(d.icon).toEqual({ name: 'redgreen', file: 'logo.svg' })
+    expect(d.image).toMatchObject({ name: 'redgreen', type: 'image/svg+xml' })
+  })
+
+  it('refuses an icon the hub would refuse', () => {
+    expect(() => parseDescriptor('service: s\nicon: {name: Bad-Name, file: logo.svg}\n')).toThrow(/icon/)
+    expect(() => parseDescriptor('service: s\nicon: {name: ok, file: logo.gif}\n')).toThrow('not .svg, .png, or .webp')
+    expect(() => parseDescriptor('service: s\nicon: {name: ok}\n')).toThrow(/file/)
   })
 
   it('refuses a file without a service', () => {
@@ -51,7 +60,8 @@ describe('Describer', () => {
   const capture = (status = 200) => {
     const calls: { method: string; url: string; auth: string; body: unknown }[] = []
     const fake = (async (url: string | URL | Request, init?: RequestInit) => {
-      calls.push({ method: init?.method ?? 'GET', url: String(url), auth: new Headers(init?.headers).get('authorization') ?? '', body: JSON.parse(String(init?.body)) })
+      const type = new Headers(init?.headers).get('content-type')
+      calls.push({ method: init?.method ?? 'GET', url: String(url), auth: new Headers(init?.headers).get('authorization') ?? '', body: type === 'application/json' ? JSON.parse(String(init?.body)) : { type, bytes: (init?.body as Uint8Array).byteLength } })
       return new Response(status === 200 ? '{}' : 'nope', { status })
     }) as typeof fetch
     return { calls, fake }
@@ -72,6 +82,24 @@ describe('Describer', () => {
     expect(calls[0]?.body).toEqual({ blueprints: DESCRIBE_BLUEPRINTS })
     expect(calls[1]?.body).toEqual({ fields: { category: 'Things', origin: 'built' }, relations: { pillars: ['platform/one'], consumes: ['github/example/other/api'], will_consume: [] } })
     expect(calls[2]?.body).toEqual({ title: 'App API', fields: { kind: 'rest', description: 'What it answers.', visibility: 'internal', external: false }, relations: { service: 'github/example/app' } })
+  })
+
+  it('puts its logo before the service that wears it', async () => {
+    const { calls, fake } = capture()
+    const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"/>')
+    const d = parseDescriptor('service: github/example/app\nicon: {name: app, file: logo.svg}\n')
+    const r = new Describer({ ORRERY_URL: 'https://hub', ORRERY_PUSH_TOKEN: 'push' }, { ...d, image: iconFile(d.icon!, svg) }, { described() {} }, silent, { fetch: fake })
+    expect(await r.once()).toBe(true)
+    expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual(['PUT https://hub/ingest/blueprints', 'PUT https://hub/api/icons/app', 'PATCH https://hub/ingest/entities/sw_service/github%2Fexample%2Fapp'])
+    expect(calls[1]?.body).toEqual({ type: 'image/svg+xml', bytes: svg.byteLength })
+    expect(calls[2]?.body).toMatchObject({ icon: 'app' })
+  })
+
+  it('fails the describe when the logo it names was not read', async () => {
+    const { calls, fake } = capture()
+    const r = new Describer({ ORRERY_URL: 'https://hub', ORRERY_PUSH_TOKEN: 'push' }, parseDescriptor('service: s\nicon: {name: app, file: logo.svg}\n'), { described() {} }, silent, { fetch: fake })
+    expect(await r.once()).toBe(false)
+    expect(calls).toHaveLength(1)
   })
 
   it('writes only its origin and connectors when the file places it nowhere', async () => {

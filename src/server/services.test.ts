@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { SERVICE_RULES, budgeted, detectServices, emailOf, isBot, lastChangeOf, readServices, serviceFiles, type RepoFiles } from './services.ts'
+import { SERVICE_RULES, budgeted, detectServices, emailOf, isBot, lastChangeOf, readLogo, readServices, serviceFiles, type RepoFiles } from './services.ts'
 
 /** A repository held in memory: path to contents. A path mapped to '' exists and says nothing. */
 const repo = (files: Record<string, string>) => ({ paths: Object.keys(files), read: async (p: string) => files[p] ?? null })
@@ -176,6 +176,7 @@ describe('reading a repository', () => {
       reads.push(p)
       return 'package main\nfunc main() {}\n'
     },
+    bytes: async () => null,
     lastChange: async (p) => (p === '' ? { at: `${commit}-at`, by: `${commit}-by`, email: `${commit}@bot.example`, humanAt: `${commit}-hat`, humanBy: `${commit}-hby`, humanEmail: `${commit}@dev.example` } : null),
   })
 
@@ -195,7 +196,13 @@ describe('reading a repository', () => {
   })
 
   it('has no services and nothing to read for a repository with no commits', async () => {
-    expect(await readServices(null, 'x', null)).toEqual({ services: { commit: null, rules: SERVICE_RULES, services: [] }, reused: false, read: 0 })
+    expect(await readServices(null, 'x', null)).toEqual({ services: { commit: null, rules: SERVICE_RULES, services: [] }, reused: false, read: 0, icon: { icon: null } })
+  })
+
+  it('reads no logo again while the branch has not moved', async () => {
+    const first = await readServices(files('a'), 'tool', null)
+    expect(first.icon).toEqual({ icon: null })
+    expect((await readServices(files('a'), 'tool', first.services)).icon).toBeUndefined()
   })
 
   it('stops reading at the budget', async () => {
@@ -232,5 +239,43 @@ describe('lastChangeOf', () => {
   it('takes extra bot names from the list given', () => {
     expect(isBot({ at: '1', by: 'Deploy Robot' }, ['deploy robot'])).toBe(true)
     expect(isBot({ at: '1', by: 'Deploy Robot' }, [])).toBe(false)
+  })
+})
+
+describe('readLogo', () => {
+  const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"/>')
+  const repoFiles = (files: Record<string, string | Uint8Array>): [RepoFiles, string[]] => [
+    {
+      commit: 'c',
+      list: async () => Object.keys(files),
+      read: async (p) => (typeof files[p] === 'string' ? files[p] : null),
+      bytes: async (p) => {
+        const f = files[p]
+        return f === undefined ? null : typeof f === 'string' ? new TextEncoder().encode(f) : f
+      },
+      lastChange: async () => null,
+    },
+    Object.keys(files),
+  ]
+
+  it('reads the logo the root orrery.yaml names, with its type and hash', async () => {
+    const { icon } = await readLogo(...repoFiles({ 'orrery.yaml': 'service: GitHub/Example/App\nicon: {name: app, file: ./brand/logo.svg}\nprovides: []\n', 'brand/logo.svg': svg }))
+    expect(icon).toMatchObject({ service: 'github/example/app', name: 'app', type: 'image/svg+xml', data: svg })
+    expect(icon?.sha256).toMatch(/^[0-9a-f]{64}$/)
+  })
+
+  it('names no logo for a repository without orrery.yaml or without an icon key', async () => {
+    expect(await readLogo(...repoFiles({ 'main.go': '' }))).toEqual({ icon: null })
+    expect(await readLogo(...repoFiles({ 'orrery.yaml': 'service: github/example/app\n' }))).toEqual({ icon: null })
+  })
+
+  it('says why a named logo cannot be used', async () => {
+    const problem = async (files: Record<string, string | Uint8Array>) => (await readLogo(...repoFiles(files))).problem
+    expect(await problem({ 'orrery.yaml': 'service: s\nicon: {name: App, file: logo.svg}\n', 'logo.svg': svg })).toMatch(/does not match/)
+    expect(await problem({ 'orrery.yaml': 'service: s\nicon: {name: app, file: logo.gif}\n', 'logo.gif': svg })).toMatch(/not .svg, .png, or .webp/)
+    expect(await problem({ 'orrery.yaml': 'service: s\nicon: {name: app, file: logo.svg}\n' })).toMatch(/not in the repository/)
+    expect(await problem({ 'orrery.yaml': 'service: s\nicon: {name: app, file: logo.png}\n', 'logo.png': new Uint8Array(256 * 1024 + 1) })).toMatch(/over 262144/)
+    expect(await problem({ 'orrery.yaml': 'icon: {name: app, file: logo.svg}\n', 'logo.svg': svg })).toMatch(/no service/)
+    expect(await problem({ 'orrery.yaml': 'service: s\nicon: {name: app}\n' })).toMatch(/a name and a file/)
   })
 })

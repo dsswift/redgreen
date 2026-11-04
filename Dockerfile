@@ -15,7 +15,7 @@ ENV NODE_ENV=production \
 WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
-COPY package.json orrery.yaml ./
+COPY package.json orrery.yaml logo.svg ./
 COPY src/server ./src/server
 COPY src/shared ./src/shared
 # The tests are not part of the image.

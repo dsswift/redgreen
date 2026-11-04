@@ -84,3 +84,20 @@ describe('deployments', () => {
     expect(store.listDeployments('r')).toEqual([])
   })
 })
+
+describe('repository logos', () => {
+  const logo = { service: 'github/example/app', name: 'app', type: 'image/svg+xml', sha256: 'a'.repeat(64), data: new Uint8Array([60, 115, 118, 103]) }
+
+  it('keeps the last upload while the name stays, and forgets it for a new name', () => {
+    const store = new Store(':memory:')
+    store.setRepoIcon('r', logo)
+    expect(store.getRepoIcon('r')).toMatchObject({ ...logo, uploadedSha256: null })
+    store.setRepoIconUploaded('r', logo.sha256)
+    store.setRepoIcon('r', { ...logo, sha256: 'b'.repeat(64) })
+    expect(store.getRepoIcon('r')?.uploadedSha256).toBe(logo.sha256)
+    store.setRepoIcon('r', { ...logo, name: 'other' })
+    expect(store.getRepoIcon('r')?.uploadedSha256).toBeNull()
+    store.setRepoIcon('r', null)
+    expect(store.getRepoIcon('r')).toBeNull()
+  })
+})

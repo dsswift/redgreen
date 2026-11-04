@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import type { Account, ProviderKind, RepoSnapshot } from '../shared/model.ts'
+import type { RepoIcon } from './icons.ts'
 import type { CarriedCommit, DeploymentRecord } from '../shared/outcomes.ts'
 import { DEFAULT_REPO_SETTINGS, defaultRuleSeverities, type Level, type RepoSettings, type RuleSeverities } from '../shared/rules.ts'
 
@@ -69,6 +70,15 @@ CREATE TABLE IF NOT EXISTS deployments (
 );
 CREATE INDEX IF NOT EXISTS deployments_repo ON deployments(repo_id, finished_at);
 CREATE INDEX IF NOT EXISTS deployments_finished ON deployments(finished_at);
+CREATE TABLE IF NOT EXISTS repo_icons (
+  repo_id TEXT PRIMARY KEY,
+  service TEXT NOT NULL,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL,
+  sha256 TEXT NOT NULL,
+  data BLOB NOT NULL,
+  uploaded_sha256 TEXT
+);
 `
 
 /**
@@ -87,7 +97,7 @@ export const MAX_CACHED_BODY = 256 * 1024
 const CACHE_GENERATION = 1
 
 /** Every table but the cache. A cache reset copies these and nothing else. */
-const KEPT_TABLES = ['settings', 'accounts', 'repos', 'repo_settings', 'level_history', 'deployments']
+const KEPT_TABLES = ['settings', 'accounts', 'repos', 'repo_settings', 'level_history', 'deployments', 'repo_icons']
 
 /**
  * Starts the cache again empty when the file predates `CACHE_GENERATION`.
@@ -153,6 +163,11 @@ export interface DiscoveredRepo {
 export interface LevelChange {
   level: Level
   at: string
+}
+
+/** A repository's logo as its orrery.yaml names it, and the hash of the bytes last put on the hub under that name. */
+export interface RepoIconRow extends RepoIcon {
+  uploadedSha256: string | null
 }
 
 export interface CachedResponse {
@@ -314,6 +329,7 @@ export class Store {
       this.db.prepare('DELETE FROM repo_settings WHERE repo_id = ?').run(id)
       this.db.prepare('DELETE FROM level_history WHERE repo_id = ?').run(id)
       this.db.prepare('DELETE FROM deployments WHERE repo_id = ?').run(id)
+      this.db.prepare('DELETE FROM repo_icons WHERE repo_id = ?').run(id)
     }
     return stale.map((s) => s.id)
   }
@@ -353,6 +369,36 @@ export class Store {
     return this.db
       .prepare('SELECT level, at FROM level_history WHERE repo_id = ? ORDER BY at DESC LIMIT ?')
       .all(repoId, limit) as unknown as LevelChange[]
+  }
+
+  // Repository logos -----------------------------------------------------------
+
+  /** Keeps the logo a repository names, or forgets it on null. The last upload counts only while the name stays the same. */
+  setRepoIcon(repoId: string, icon: RepoIcon | null): void {
+    if (!icon) {
+      this.db.prepare('DELETE FROM repo_icons WHERE repo_id = ?').run(repoId)
+      return
+    }
+    this.db
+      .prepare(
+        `INSERT INTO repo_icons (repo_id, service, name, type, sha256, data) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(repo_id) DO UPDATE SET service = excluded.service, type = excluded.type, sha256 = excluded.sha256, data = excluded.data,
+           uploaded_sha256 = CASE WHEN repo_icons.name = excluded.name THEN repo_icons.uploaded_sha256 ELSE NULL END,
+           name = excluded.name`,
+      )
+      .run(repoId, icon.service, icon.name, icon.type, icon.sha256, icon.data)
+  }
+
+  getRepoIcon(repoId: string): RepoIconRow | null {
+    const row = this.db.prepare('SELECT service, name, type, sha256, data, uploaded_sha256 FROM repo_icons WHERE repo_id = ?').get(repoId) as
+      | { service: string; name: string; type: string; sha256: string; data: Uint8Array; uploaded_sha256: string | null }
+      | undefined
+    return row ? { service: row.service, name: row.name, type: row.type, sha256: row.sha256, data: row.data, uploadedSha256: row.uploaded_sha256 } : null
+  }
+
+  /** Records that these bytes are on the hub under the repository's logo name. */
+  setRepoIconUploaded(repoId: string, sha256: string): void {
+    this.db.prepare('UPDATE repo_icons SET uploaded_sha256 = ? WHERE repo_id = ?').run(sha256, repoId)
   }
 
   // Deployments ----------------------------------------------------------------

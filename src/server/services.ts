@@ -8,9 +8,10 @@
 
 import { languageOfFile, mainLanguage, type Language } from '../shared/languages.ts'
 import type { DetectedService, RepoServices, ServiceFiles, ServiceType } from '../shared/model.ts'
+import { describedIcon, iconFile, type RepoIcon } from './icons.ts'
 
 /** Bump on any change to the rules below, so every repository is read again instead of trusting its last answer. */
-export const SERVICE_RULES = 7
+export const SERVICE_RULES = 8
 
 /** A commit as a forge names it. Either part is null when the forge left it out. */
 export interface Commit {
@@ -62,6 +63,8 @@ export interface RepoFiles {
   list(): Promise<string[]>
   /** One file's text, or null when it cannot be read. */
   read(path: string): Promise<string | null>
+  /** One file's bytes, for a file that may not be text, or null when it cannot be read. */
+  bytes(path: string): Promise<Uint8Array | null>
   /** When the newest commits at or before this one touched `path`, a folder or `''` for the root, and who made the newest and the newest by a person. Null when the forge cannot say. */
   lastChange(path: string): Promise<LastChange | null>
 }
@@ -432,17 +435,55 @@ export function budgeted(read: Read, budget = READ_BUDGET): { read: Read; spent:
  * stands while the branch has not moved and the rules have not changed, so a
  * quiet repository costs one look at its head.
  */
-export async function readServices(files: RepoFiles | null, repoName: string, previous: RepoServices | null | undefined): Promise<{ services: RepoServices; reused: boolean; read: number }> {
-  if (!files) return { services: { commit: null, rules: SERVICE_RULES, services: [] }, reused: false, read: 0 }
+export async function readServices(files: RepoFiles | null, repoName: string, previous: RepoServices | null | undefined): Promise<{ services: RepoServices; reused: boolean; read: number; icon?: RepoLogo }> {
+  if (!files) return { services: { commit: null, rules: SERVICE_RULES, services: [] }, reused: false, read: 0, icon: { icon: null } }
   if (previous && previous.commit === files.commit && previous.rules === SERVICE_RULES) return { services: previous, reused: true, read: 0 }
   const reader = budgeted((p) => files.read(p))
-  const found = await detectServices(await files.list(), reader.read, repoName)
+  const paths = await files.list()
+  const icon = await readLogo(files, paths)
+  const found = await detectServices(paths, reader.read, repoName)
   const services = await Promise.all(
     found.map(async (s) => {
       const last = await files.lastChange(s.path)
       return { ...s, changedAt: last?.at ?? null, changedBy: last?.by ?? null, changedByEmail: last?.email ?? null, humanChangedAt: last?.humanAt ?? null, humanChangedBy: last?.humanBy ?? null, humanChangedByEmail: last?.humanEmail ?? null }
     }),
   )
-  return { services: { commit: files.commit, rules: SERVICE_RULES, services }, reused: false, read: reader.spent() }
+  return { services: { commit: files.commit, rules: SERVICE_RULES, services }, reused: false, read: reader.spent(), icon }
+}
+
+/** The logo a repository's root orrery.yaml names, or none, with why a named one cannot be used. */
+export interface RepoLogo {
+  icon: RepoIcon | null
+  problem?: string
+}
+
+/** Where a repository describes itself. */
+export const DESCRIPTOR_FILE = 'orrery.yaml'
+
+/**
+ * The logo the root orrery.yaml names for its service, read at the same
+ * commit as the services. A logo named the wrong way is a problem, not an
+ * error: the services still stand. A forge that cannot answer throws, so the
+ * last answer stands.
+ */
+export async function readLogo(files: RepoFiles, paths: string[]): Promise<RepoLogo> {
+  if (!paths.includes(DESCRIPTOR_FILE)) return { icon: null }
+  const text = await files.read(DESCRIPTOR_FILE)
+  if (text === null) return { icon: null }
+  let named: ReturnType<typeof describedIcon>
+  try {
+    named = describedIcon(text)
+  } catch (error) {
+    return { icon: null, problem: error instanceof Error ? error.message : String(error) }
+  }
+  if (!named) return { icon: null }
+  const file = named.icon.file.replace(/^\.?\//, '')
+  const data = paths.includes(file) ? await files.bytes(file) : null
+  if (!data) return { icon: null, problem: `icon file "${named.icon.file}" is not in the repository` }
+  try {
+    return { icon: { ...iconFile(named.icon, data), service: named.service.toLowerCase() } }
+  } catch (error) {
+    return { icon: null, problem: error instanceof Error ? error.message : String(error) }
+  }
 }
 

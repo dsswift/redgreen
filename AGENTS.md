@@ -29,7 +29,16 @@ Estate health board. Read `README.md` first.
   not add an SDK.
 - `server/describe.ts` writes redgreen's own description from the root
   `orrery.yaml` when `ORRERY_URL` and `ORRERY_PUSH_TOKEN` are set. It reads
-  only `ORRERY_PUSH_TOKEN`. The image must carry `orrery.yaml`.
+  only `ORRERY_PUSH_TOKEN`. The image must carry `orrery.yaml` and the logo
+  its `icon` names (`logo.svg`); the logo is put with `PUT /api/icons/{name}`
+  before the service that wears it.
+- `server/icons.ts` checks a logo the way the hub checks a custom icon, for
+  both writers. `readLogo` in `server/services.ts` reads the logo a repo's
+  root `orrery.yaml` names, at the same commit as its services; the store
+  keeps its bytes and the hash last put (`repo_icons`). The pusher puts it
+  only when that hash changed, and `toServices` gives the named service that
+  icon in place of its language's. A failed put writes that service with no
+  icon, never its language's, so describe and redgreen never fight.
 - `server/services.ts` finds the services in a repo from the files that build
   them. `detectServices` is the only place a service is recognised; a
   provider only hands over its file list and a reader through `files` on

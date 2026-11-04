@@ -15,6 +15,12 @@ export async function githubFiles(kit: Octokit, fullName: string, branch: string
     throw error
   }
   const blobs = new Map<string, string>()
+  const blob = async (path: string): Promise<Buffer | null> => {
+    const sha = blobs.get(path)
+    if (!sha) return null
+    const { data } = await kit.request('GET /repos/{owner}/{repo}/git/blobs/{file_sha}', { owner, repo, file_sha: sha })
+    return Buffer.from(data.content, data.encoding === 'base64' ? 'base64' : 'utf8')
+  }
   return {
     commit,
     list: async () => {
@@ -23,12 +29,8 @@ export async function githubFiles(kit: Octokit, fullName: string, branch: string
       for (const item of data.tree) if (item.type === 'blob' && item.path && item.sha) blobs.set(item.path, item.sha)
       return [...blobs.keys()]
     },
-    read: async (path) => {
-      const sha = blobs.get(path)
-      if (!sha) return null
-      const { data } = await kit.request('GET /repos/{owner}/{repo}/git/blobs/{file_sha}', { owner, repo, file_sha: sha })
-      return data.encoding === 'base64' ? Buffer.from(data.content, 'base64').toString('utf8') : data.content
-    },
+    read: async (path) => (await blob(path))?.toString('utf8') ?? null,
+    bytes: blob,
     lastChange: async (path) => {
       const { data } = await kit.request('GET /repos/{owner}/{repo}/commits', { owner, repo, sha: commit, per_page: HUMAN_LOOKBACK, ...(path ? { path } : {}) })
       return lastChangeOf(data.map((c) => ({ at: c.commit.committer?.date ?? c.commit.author?.date ?? null, by: c.author?.login ?? c.commit.author?.name ?? null, email: c.commit.author?.email ?? (c.author?.type === 'Bot' ? '[bot]' : null) })))
