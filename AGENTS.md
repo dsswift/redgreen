@@ -71,8 +71,9 @@ The forges' door into Orrery. Read `README.md` first.
 Commit on `main` and land with `release-damnit land`. CI versions every `feat`
 and `fix` since the last release tag, tags it, and builds the tag's image,
 `ghcr.io/dsswift/redgreen`. Never edit `VERSION`, the manifest, or
-`CHANGELOG.md` by hand. The image build reads the private Orrery module with
-the `ORRERY_MODULE_TOKEN` secret.
+`CHANGELOG.md` by hand. CI and the image build reach the private Orrery module
+through the `ORRERY_DEPLOY_KEY` secret, a read-only deploy key on
+`dsswift/orrery`, loaded into an SSH agent.
 
 ## Checks
 

@@ -168,8 +168,9 @@ A local run against GitHub with a personal token:
 GITHUB_TOKEN=$(gh auth token) GITHUB_TOKEN_ACCOUNTS=<owner> go run ./cmd/redgreen serve
 ```
 
-The image builds with the Orrery module token as a build secret:
+The Orrery SDK is a private module. The image build fetches it through your
+SSH agent, with a key that can read `dsswift/orrery`:
 
 ```bash
-GITAUTH=<token> docker build --platform linux/amd64 --secret id=gitauth,env=GITAUTH .
+docker build --platform linux/amd64 --ssh default .
 ```

@@ -9,24 +9,31 @@ jobs:
   check:
     runs-on: ubuntu-latest
     env:
-      GOPRIVATE: github.com/dsswift/*
+      GOPRIVATE: github.com/dsswift/orrery
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      # The Orrery SDK is a private module; the secret reads it and nothing else.
-      - name: Read the Orrery module
+      # The Orrery SDK is a private module. A read-only deploy key on dsswift/orrery reaches it; this
+      # job and the image build fetch it through an SSH agent.
+      - name: Reach the Orrery module
         env:
-          TOKEN: ${{ secrets.ORRERY_MODULE_TOKEN }}
-        run: git config --global url."https://x-access-token:${TOKEN}@github.com/dsswift/".insteadOf "https://github.com/dsswift/"
+          KEY: ${{ secrets.ORRERY_DEPLOY_KEY }}
+        run: |
+          eval "$(ssh-agent -s)"
+          echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> "$GITHUB_ENV"
+          ssh-add - <<< "$KEY"
+          mkdir -p ~/.ssh
+          echo 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' >> ~/.ssh/known_hosts
+          git config --global url."git@github.com:dsswift/orrery".insteadOf https://github.com/dsswift/orrery
       - run: go vet ./...
       - run: go test ./...
       # Every calculation compiles and answers as intended in Orrery's own expression language.
       - uses: actions/checkout@v4
         with:
           repository: dsswift/orrery
-          token: ${{ secrets.ORRERY_MODULE_TOKEN }}
+          ssh-key: ${{ secrets.ORRERY_DEPLOY_KEY }}
           path: orrery
       - uses: actions/setup-node@v4
         with:
@@ -45,5 +52,4 @@ jobs:
           context: .
           push: false
           platforms: linux/amd64
-          secrets: |
-            gitauth=${{ secrets.ORRERY_MODULE_TOKEN }}
+          ssh: default
