@@ -8,19 +8,42 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    env:
+      GOPRIVATE: github.com/dsswift/*
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      # The Orrery SDK is a private module; the secret reads it and nothing else.
+      - name: Read the Orrery module
+        env:
+          TOKEN: ${{ secrets.ORRERY_MODULE_TOKEN }}
+        run: git config --global url."https://x-access-token:${TOKEN}@github.com/dsswift/".insteadOf "https://github.com/dsswift/"
+      - run: go vet ./...
+      - run: go test ./...
+      # Every calculation compiles and answers as intended in Orrery's own expression language.
+      - uses: actions/checkout@v4
+        with:
+          repository: dsswift/orrery
+          token: ${{ secrets.ORRERY_MODULE_TOKEN }}
+          path: orrery
       - uses: actions/setup-node@v4
         with:
-          node-version-file: package.json
-          cache: npm
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run build
+          node-version: 24
+      - name: Install Orrery's dependencies
+        working-directory: orrery
+        run: npm ci --ignore-scripts
+      - name: Check the expressions
+        run: |
+          go run ./scripts/blueprints > "$RUNNER_TEMP/blueprints.json"
+          node scripts/check-expressions.mts "$RUNNER_TEMP/blueprints.json" orrery
+      - uses: docker/setup-buildx-action@v3
       - name: Build image
         uses: docker/build-push-action@v5
         with:
           context: .
           push: false
           platforms: linux/amd64
+          secrets: |
+            gitauth=${{ secrets.ORRERY_MODULE_TOKEN }}
