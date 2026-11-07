@@ -14,19 +14,8 @@
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
         {
-          "type": "json",
-          "path": "package.json",
-          "jsonpath": "$.version"
-        },
-        {
-          "type": "json",
-          "path": "package-lock.json",
-          "jsonpath": "$.version"
-        },
-        {
-          "type": "json",
-          "path": "package-lock.json",
-          "jsonpath": "$.packages[\"\"].version"
+          "type": "generic",
+          "path": "VERSION"
         }
       ]
     }

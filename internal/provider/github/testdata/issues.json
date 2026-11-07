@@ -1,0 +1,46 @@
+[
+  {
+    "number": 3,
+    "title": "Crash on start",
+    "html_url": "https://github.com/acme/mirror/issues/3",
+    "user": {
+      "login": "user1"
+    },
+    "labels": [
+      {
+        "name": "bug"
+      }
+    ],
+    "assignees": [
+      {
+        "login": "dev"
+      }
+    ],
+    "comments": 2,
+    "created_at": "2026-09-01T00:00:00Z",
+    "updated_at": "2026-09-02T00:00:00Z",
+    "milestone": {
+      "title": "v2"
+    },
+    "type": {
+      "name": "Bug"
+    },
+    "body": "long text"
+  },
+  {
+    "number": 7,
+    "title": "Add a cache",
+    "html_url": "https://github.com/acme/mirror/pull/7",
+    "user": {
+      "login": "dev"
+    },
+    "labels": [],
+    "assignees": [],
+    "comments": 0,
+    "created_at": "2026-09-20T00:00:00Z",
+    "updated_at": "2026-09-21T00:00:00Z",
+    "pull_request": {
+      "url": "x"
+    }
+  }
+]

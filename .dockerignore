@@ -1,7 +1,9 @@
-node_modules
-dist
-data
 .git
-.claude
-*.md
 .github
+.claude
+data
+logs
+scripts
+*.md
+**/*_test.go
+**/testdata

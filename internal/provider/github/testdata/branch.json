@@ -1,0 +1,19 @@
+{
+  "name": "main",
+  "protected": true,
+  "commit": {
+    "sha": "head1",
+    "commit": {
+      "message": "fix: x",
+      "author": {
+        "name": "A Developer",
+        "email": "Dev@Example.com",
+        "date": "2026-09-30T02:30:00Z"
+      }
+    },
+    "author": {
+      "login": "a-dev",
+      "type": "User"
+    }
+  }
+}

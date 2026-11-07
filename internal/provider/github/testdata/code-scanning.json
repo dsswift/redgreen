@@ -1,0 +1,16 @@
+[
+  {
+    "number": 1,
+    "rule": {
+      "security_severity_level": null,
+      "severity": "error"
+    }
+  },
+  {
+    "number": 2,
+    "rule": {
+      "security_severity_level": "critical",
+      "severity": "error"
+    }
+  }
+]

@@ -1,0 +1,23 @@
+{
+  "total_count": 2,
+  "workflows": [
+    {
+      "id": 7,
+      "name": "Pipeline",
+      "path": ".github/workflows/pipeline.yaml",
+      "state": "active",
+      "html_url": "https://github.com/acme/mirror/actions/workflows/pipeline.yaml",
+      "created_at": "2026-09-01T00:00:00Z",
+      "updated_at": "2026-09-01T00:00:00Z"
+    },
+    {
+      "id": 8,
+      "name": "Old",
+      "path": ".github/workflows/old.yaml",
+      "state": "deleted",
+      "html_url": "x",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    }
+  ]
+}

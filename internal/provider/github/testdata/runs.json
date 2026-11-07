@@ -1,0 +1,85 @@
+{
+  "total_count": 4,
+  "workflow_runs": [
+    {
+      "id": 104,
+      "run_number": 4,
+      "workflow_id": 7,
+      "display_title": "sync",
+      "event": "push",
+      "head_branch": "main",
+      "head_sha": "c3",
+      "status": "completed",
+      "conclusion": "failure",
+      "created_at": "2026-09-30T03:00:00Z",
+      "updated_at": "2026-09-30T03:00:40Z",
+      "html_url": "https://github.com/acme/mirror/actions/runs/104",
+      "actor": {
+        "login": "dev"
+      },
+      "repository": {
+        "id": 1
+      }
+    },
+    {
+      "id": 103,
+      "run_number": 3,
+      "workflow_id": 7,
+      "display_title": "sync",
+      "event": "workflow_dispatch",
+      "head_branch": "main",
+      "head_sha": "c2",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-09-30T02:00:00Z",
+      "updated_at": "2026-09-30T02:00:40Z",
+      "html_url": "https://github.com/acme/mirror/actions/runs/103",
+      "actor": {
+        "login": "dev"
+      },
+      "repository": {
+        "id": 1
+      }
+    },
+    {
+      "id": 102,
+      "run_number": 2,
+      "workflow_id": 7,
+      "display_title": "sync",
+      "event": "push",
+      "head_branch": "v1.2.0",
+      "head_sha": "t1",
+      "status": "completed",
+      "conclusion": "failure",
+      "created_at": "2026-09-29T10:05:00Z",
+      "updated_at": "2026-09-29T10:05:40Z",
+      "html_url": "https://github.com/acme/mirror/actions/runs/102",
+      "actor": {
+        "login": "dev"
+      },
+      "repository": {
+        "id": 1
+      }
+    },
+    {
+      "id": 101,
+      "run_number": 1,
+      "workflow_id": 7,
+      "display_title": "sync",
+      "event": "push",
+      "head_branch": "main",
+      "head_sha": "c1",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-09-29T09:00:00Z",
+      "updated_at": "2026-09-29T09:00:40Z",
+      "html_url": "https://github.com/acme/mirror/actions/runs/101",
+      "actor": {
+        "login": "dev"
+      },
+      "repository": {
+        "id": 1
+      }
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+[
+  {
+    "tag_name": "v1.2.0",
+    "name": "",
+    "published_at": "2026-09-29T10:00:00Z",
+    "html_url": "https://github.com/acme/mirror/releases/v1.2.0",
+    "draft": false,
+    "prerelease": false,
+    "body": "notes"
+  },
+  {
+    "tag_name": "v1.3.0",
+    "name": "draft",
+    "published_at": null,
+    "html_url": "x",
+    "draft": true,
+    "prerelease": false
+  }
+]

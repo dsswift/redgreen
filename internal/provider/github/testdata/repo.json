@@ -1,0 +1,28 @@
+{
+  "id": 1,
+  "node_id": "R_kgDO",
+  "name": "mirror",
+  "full_name": "acme/mirror",
+  "html_url": "https://github.com/acme/mirror",
+  "description": null,
+  "default_branch": "main",
+  "visibility": "private",
+  "private": true,
+  "archived": false,
+  "fork": false,
+  "language": "Go",
+  "pushed_at": "2026-09-30T02:34:00Z",
+  "stargazers_count": 3,
+  "open_issues_count": 3,
+  "owner": {
+    "id": 10,
+    "login": "acme",
+    "type": "Organization"
+  },
+  "topics": [
+    "infra"
+  ],
+  "permissions": {
+    "admin": false
+  }
+}

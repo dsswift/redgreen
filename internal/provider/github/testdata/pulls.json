@@ -1,0 +1,36 @@
+[
+  {
+    "number": 7,
+    "title": "Add a cache",
+    "html_url": "https://github.com/acme/mirror/pull/7",
+    "draft": false,
+    "created_at": "2026-09-20T00:00:00Z",
+    "updated_at": "2026-09-21T00:00:00Z",
+    "user": {
+      "login": "dev"
+    },
+    "labels": [
+      {
+        "name": "perf"
+      }
+    ],
+    "head": {
+      "sha": "p7"
+    }
+  },
+  {
+    "number": 8,
+    "title": "WIP",
+    "html_url": "https://github.com/acme/mirror/pull/8",
+    "draft": true,
+    "created_at": "2026-09-29T00:00:00Z",
+    "updated_at": "2026-09-29T00:00:00Z",
+    "user": {
+      "login": "dev"
+    },
+    "labels": [],
+    "head": {
+      "sha": "p8"
+    }
+  }
+]

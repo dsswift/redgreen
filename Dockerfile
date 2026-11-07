@@ -1,28 +1,34 @@
-# Build the web app, then ship the server source as-is: Node 24 runs
-# TypeScript directly, so the server has no build step.
-FROM node:24.21.0-alpine AS build
-WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci
-COPY vite.config.ts tsconfig.json ./
-COPY src ./src
-RUN npm run build && npm prune --omit=dev
+# syntax=docker/dockerfile:1
+# A static binary on distroless. The Orrery SDK is a private module: the
+# build reads it with the token in the `gitauth` secret, for one command only,
+# so no layer keeps it.
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
+RUN apk add --no-cache git
+WORKDIR /src
+ENV CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOPRIVATE=github.com/dsswift/*
+COPY go.mod go.sum ./
+RUN --mount=type=secret,id=gitauth \
+    if [ -s /run/secrets/gitauth ]; then \
+      GIT_CONFIG_COUNT=1 \
+      GIT_CONFIG_KEY_0="url.https://x-access-token:$(cat /run/secrets/gitauth)@github.com/dsswift/.insteadOf" \
+      GIT_CONFIG_VALUE_0="https://github.com/dsswift/" \
+      go mod download; \
+    else go mod download; fi
+COPY VERSION ./
+COPY cmd ./cmd
+COPY internal ./internal
+RUN version=$(sed 's/ .*//' VERSION) \
+ && go build -trimpath -ldflags "-s -w -X main.version=${version}" -o /out/redgreen ./cmd/redgreen \
+ && mkdir -p /out/data
 
-FROM node:24.21.0-alpine
-ENV NODE_ENV=production \
-    PORT=8080 \
-    DATA_DIR=/data
+FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /app
-COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/dist ./dist
-COPY package.json orrery.yaml logo.svg ./
-COPY src/server ./src/server
-COPY src/shared ./src/shared
-# The tests are not part of the image.
-RUN find src -name '*.test.ts' -delete \
- && mkdir -p /data && chown node:node /data
-USER node
+COPY --from=build /out/redgreen /app/redgreen
+COPY orrery.yaml logo.svg /app/
+COPY --from=build --chown=nonroot:nonroot /out/data /data
+ENV PORT=8080 DATA_DIR=/data
 VOLUME /data
 EXPOSE 8080
-HEALTHCHECK --interval=30s --timeout=3s CMD wget -qO- http://127.0.0.1:8080/healthz || exit 1
-CMD ["node", "--no-warnings=ExperimentalWarning", "src/server/main.ts"]
+USER nonroot
+ENTRYPOINT ["/app/redgreen"]
+CMD ["serve"]

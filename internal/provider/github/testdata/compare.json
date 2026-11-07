@@ -1,0 +1,33 @@
+{
+  "total_commits": 2,
+  "commits": [
+    {
+      "sha": "c1",
+      "commit": {
+        "message": "feat: add\n\nbody",
+        "author": {
+          "name": "a",
+          "email": "a@example.com",
+          "date": "2026-09-29T00:00:00Z"
+        },
+        "committer": {
+          "date": "2026-09-29T00:00:00Z"
+        }
+      }
+    },
+    {
+      "sha": "c2",
+      "commit": {
+        "message": "fix: it",
+        "author": {
+          "name": "a",
+          "email": "a@example.com",
+          "date": "2026-09-29T12:00:00Z"
+        },
+        "committer": {
+          "date": "2026-09-29T12:00:00Z"
+        }
+      }
+    }
+  ]
+}

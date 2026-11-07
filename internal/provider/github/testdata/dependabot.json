@@ -1,0 +1,20 @@
+[
+  {
+    "number": 1,
+    "security_vulnerability": {
+      "severity": "critical"
+    }
+  },
+  {
+    "number": 2,
+    "security_vulnerability": {
+      "severity": "high"
+    }
+  },
+  {
+    "number": 3,
+    "security_vulnerability": {
+      "severity": "critical"
+    }
+  }
+]
