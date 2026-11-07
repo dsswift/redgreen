@@ -167,3 +167,33 @@ func TestRuleSeveritiesHaveTheirDefaults(t *testing.T) {
 		t.Errorf("rules without a severity: %v", want)
 	}
 }
+
+// TestDeliveryTrendsReadKeptMeasures checks every trend of the delivery
+// measures reads a field of its own blueprint that keeps a history and is
+// exported as a gauge: the hub refuses a blueprint whose trend reads less.
+func TestDeliveryTrendsReadKeptMeasures(t *testing.T) {
+	for _, relation := range []string{"<-" + Deployment + ":service", "<-" + Service + ":team.<-" + Deployment + ":service"} {
+		defs := map[string]map[string]any{}
+		for _, fd := range DORA(relation) {
+			defs[fd.Name] = fd.Def
+		}
+		trends := 0
+		for name, def := range defs {
+			if def["type"] != "trend" {
+				continue
+			}
+			trends++
+			of := def["history"].(map[string]any)["of"].(string)
+			read, ok := defs[of]
+			if !ok {
+				t.Fatalf("%s reads %s, which the measures lack", name, of)
+			}
+			if _, kept := read["history"].(map[string]any)["keep"]; !kept || read["metric"] != true {
+				t.Errorf("%s reads %s, which keeps no history or is no gauge", name, of)
+			}
+		}
+		if trends != 4 {
+			t.Errorf("%d trends, want one per measure", trends)
+		}
+	}
+}

@@ -67,8 +67,8 @@ var (
 
 // Repository calculations, in order.
 var (
-	openAlerts       = "coalesce(dependabot_critical, 0) + coalesce(dependabot_high, 0) + coalesce(code_scanning_critical, 0) + coalesce(code_scanning_high, 0)"
-	daysIdle         = "days_since(last_push)"
+	openAlerts = "coalesce(dependabot_critical, 0) + coalesce(dependabot_high, 0) + coalesce(code_scanning_critical, 0) + coalesce(code_scanning_high, 0)"
+	daysIdle   = "days_since(last_push)"
 	// A repository that runs nothing is quiet: it never turns the board red, whatever else it carries.
 	repositoryStatus = "muted == true || archived == true || pipelines_active == 0 ? 'grey'" +
 		" : contains(" + levels(RepositoryRules) + ", 'red') || pipelines_red > 0 ? 'red'" +

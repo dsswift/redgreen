@@ -256,28 +256,42 @@ func DORA(relation string) Fields {
 		return f(name, typed(t, append([]any{"title", title, "description", help, "calculation", calc}, extra...)...))
 	}
 	band := []string{"elite", "high", "medium", "low"}
+	// The headline measures keep two years of history, draw a weekly trend from
+	// it, and are exported as the hub's field gauge for dashboards.
+	kept := func(fd Field) Field {
+		fd.Def["history"] = map[string]any{"keep": "730d"}
+		fd.Def["metric"] = true
+		return fd
+	}
+	trend := func(of, title string) Field {
+		return f(of+"_trend", typed("trend", "title", title, "description", "Weekly, over two years, from the field's history.", "history", map[string]any{"of": of, "every": "1w", "last": "104w"}))
+	}
 	return Fields{
 		n("dora_deployments_30d", "Deployments (30d)", "Successful deployments in the last 30 days.", agg(relation, "count", "", ok, now, "")),
 		n("dora_deployments_prev_30d", "Deployments (30d before)", "Successful deployments in the 30 days before those.", agg(relation, "count", "", ok, before, "")),
-		n("dora_deploy_frequency_30d", "Deploys per day (30d)", "Successful deployments per day over the last 30 days.", agg(relation, "count", "", ok, now, "day")),
+		kept(n("dora_deploy_frequency_30d", "Deploys per day (30d)", "Successful deployments per day over the last 30 days.", agg(relation, "count", "", ok, now, "day"))),
 		n("dora_deploy_frequency_prev_30d", "Deploys per day (30d before)", "The same over the 30 days before.", agg(relation, "count", "", ok, before, "day")),
 		n("dora_changes_30d", "Changes (30d)", "Deployments that reached an end in the last 30 days, failed ones included.", agg(relation, "count", "", ended, now, "")),
 		n("dora_changes_prev_30d", "Changes (30d before)", "The same over the 30 days before.", agg(relation, "count", "", ended, before, "")),
 		n("dora_failed_changes_30d", "Failed changes (30d)", "Deployments in the last 30 days that failed, needed a fix within a day, or were followed by an incident.", agg(relation, "count", "", failed, now, "")),
 		n("dora_failed_changes_prev_30d", "Failed changes (30d before)", "The same over the 30 days before.", agg(relation, "count", "", failed, before, "")),
-		n("dora_lead_time_p50_hours", "Lead time p50 (h)", "Median of the successful deployments' lead times, the last 30 days.", agg(relation, "median", "lead_time_hours", ok, now, "")),
+		kept(n("dora_lead_time_p50_hours", "Lead time p50 (h)", "Median of the successful deployments' lead times, the last 30 days.", agg(relation, "median", "lead_time_hours", ok, now, ""))),
 		n("dora_lead_time_p90_hours", "Lead time p90 (h)", "The 90th percentile of the same.", agg(relation, "p90", "lead_time_hours", ok, now, "")),
 		n("dora_lead_time_p50_prev_hours", "Lead time p50 (h, 30d before)", "The median over the 30 days before.", agg(relation, "median", "lead_time_hours", ok, before, "")),
 		n("dora_lead_time_p90_prev_hours", "Lead time p90 (h, 30d before)", "The 90th percentile over the 30 days before.", agg(relation, "p90", "lead_time_hours", ok, before, "")),
-		n("dora_time_to_restore_p50_hours", "Time to restore p50 (h)", "Median hours from a failed change to its restore, the last 30 days.", agg(relation, "median", "restore_hours", failed, now, "")),
+		kept(n("dora_time_to_restore_p50_hours", "Time to restore p50 (h)", "Median hours from a failed change to its restore, the last 30 days.", agg(relation, "median", "restore_hours", failed, now, ""))),
 		n("dora_time_to_restore_p50_prev_hours", "Time to restore p50 (h, 30d before)", "The same over the 30 days before.", agg(relation, "median", "restore_hours", failed, before, "")),
-		c("dora_change_failure_rate_30d", "number", "Change failure rate (%)", "Failed changes as a share of changes, the last 30 days.", changeFailureRate),
+		kept(c("dora_change_failure_rate_30d", "number", "Change failure rate (%)", "Failed changes as a share of changes, the last 30 days.", changeFailureRate)),
 		c("dora_change_failure_rate_prev_30d", "number", "Change failure rate (%, 30d before)", "The same over the 30 days before.", changeFailureRatePrev),
 		c("dora_frequency_band", "enum", "Deploy frequency band", "The DORA band of deploy frequency.", frequencyBand, "values", band),
 		c("dora_lead_time_band", "enum", "Lead time band", "The DORA band of the median lead time.", leadTimeBand, "values", band),
 		c("dora_change_failure_band", "enum", "Change failure band", "The DORA band of the change failure rate.", changeFailureBand, "values", band),
 		c("dora_restore_band", "enum", "Time to restore band", "The DORA band of the median time to restore.", restoreBand, "values", band),
-		c("dora_grade", "enum", "DORA grade", "The worst band among the measures with data. Empty where nothing deployed in 30 days.", doraGrade, "values", band),
+		kept(c("dora_grade", "enum", "DORA grade", "The worst band among the measures with data. Empty where nothing deployed in 30 days.", doraGrade, "values", band)),
+		trend("dora_deploy_frequency_30d", "Deploys per day, two years"),
+		trend("dora_lead_time_p50_hours", "Lead time p50, two years"),
+		trend("dora_change_failure_rate_30d", "Change failure rate, two years"),
+		trend("dora_time_to_restore_p50_hours", "Time to restore p50, two years"),
 	}
 }
 
