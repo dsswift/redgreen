@@ -57,8 +57,8 @@ func levels(rules []Rule) string {
 
 // Pipeline calculations, in order.
 var (
-	pipelineStatus = "muted == true || state == 'disabled' ? 'grey' : contains(" + levels(PipelineRules) + ", 'red') ? 'red' : contains(" + levels(PipelineRules) + ", 'amber') ? 'amber' : 'green'"
-	pipelineReason = "status == 'grey' ? (muted == true ? 'muted' : 'disabled') : status == 'green' ? null" +
+	pipelineStatus = "muted == true || repository_muted == true || state == 'disabled' ? 'grey' : contains(" + levels(PipelineRules) + ", 'red') ? 'red' : contains(" + levels(PipelineRules) + ", 'amber') ? 'amber' : 'green'"
+	pipelineReason = "status == 'grey' ? (muted == true || repository_muted == true ? 'muted' : 'disabled') : status == 'green' ? null" +
 		" : default_branch_failing_level == status ? name + ' failing on ' + default_branch" +
 		" : schedule_stale_level == status ? (schedule_state == 'disabled' ? name + ' schedule switched off by the forge' : name + ' schedule stopped')" +
 		" : release_build_failed_level == status ? name + ' build failed for release ' + coalesce(release_ref, '')" +

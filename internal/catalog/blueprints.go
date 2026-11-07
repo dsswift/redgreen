@@ -172,6 +172,7 @@ func PipelineBlueprint() sdk.Blueprint {
 			f("trend_month", typed("enum", "values", []string{"improving", "steady", "worsening"}, "description", "The last 30 days' success rate against the 30 before, by 10 points or more.")),
 			f("success_trend", typed("trend", "title", "Success rate (60d)", "description", "The weekly success rate of default-branch runs over 60 days.")),
 			f("muted", typed("boolean", "default", false, "description", "A muted pipeline is grey and colours nothing.")),
+			f("repository_muted", typed("boolean", "title", "Repository muted", "mirror", "repository.muted", "description", "A pipeline of a muted repository is grey too.")),
 		}, facts, severities(PipelineRules), rules(PipelineRules), status(pipelineStatus, pipelineReason)),
 		"relations": map[string]any{"repository": map[string]any{"target": Repository, "many": false, "title": "Repository", "inverseTitle": "Pipelines"}},
 	}

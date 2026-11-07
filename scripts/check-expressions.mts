@@ -86,6 +86,7 @@ expect('pipeline failing', pipe({ default_branch_failing: true }), { status: 're
 expect('pipeline flaky', pipe({ flaky: true }), { status: 'amber', status_reason: 'CI is flaky' })
 expect('pipeline failing and flaky', pipe({ default_branch_failing: true, flaky: true }), { status: 'red', status_reason: 'CI failing on main' })
 expect('pipeline muted', pipe({ default_branch_failing: true, muted: true }), { status: 'grey', status_reason: 'muted' })
+expect('pipeline of a muted repository', pipe({ default_branch_failing: true, repository_muted: true }), { status: 'grey', status_reason: 'muted' })
 expect('pipeline disabled', pipe({ state: 'disabled', default_branch_failing: true }), { status: 'grey', status_reason: 'disabled' })
 expect('pipeline schedule missed', pipe({ name: 'Nightly', schedule_state: 'missed' }), { schedule_stale: true, status: 'amber', status_reason: 'Nightly schedule stopped' })
 expect('pipeline schedule switched off', pipe({ name: 'Nightly', state: 'dormant', schedule_state: 'disabled' }), { status: 'amber', status_reason: 'Nightly schedule switched off by the forge' })
