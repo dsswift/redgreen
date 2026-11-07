@@ -69,10 +69,11 @@ var (
 var (
 	openAlerts       = "coalesce(dependabot_critical, 0) + coalesce(dependabot_high, 0) + coalesce(code_scanning_critical, 0) + coalesce(code_scanning_high, 0)"
 	daysIdle         = "days_since(last_push)"
-	repositoryStatus = "muted == true || archived == true ? 'grey'" +
+	// A repository that runs nothing is quiet: it never turns the board red, whatever else it carries.
+	repositoryStatus = "muted == true || archived == true || pipelines_active == 0 ? 'grey'" +
 		" : contains(" + levels(RepositoryRules) + ", 'red') || pipelines_red > 0 ? 'red'" +
 		" : contains(" + levels(RepositoryRules) + ", 'amber') || pipelines_amber > 0 ? 'amber'" +
-		" : pipelines_active > 0 ? 'green' : 'grey'"
+		" : 'green'"
 	repositoryReason = "status == 'grey' ? (muted == true ? 'muted' : archived == true ? 'archived' : 'no pipelines') : status == 'green' ? null" +
 		" : archive_candidate_level == status ? 'idle ' + days_idle + ' days and red: a candidate to archive'" +
 		" : critical_alerts_level == status ? (coalesce(dependabot_critical, 0) + coalesce(code_scanning_critical, 0)) + ' critical alerts open'" +

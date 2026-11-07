@@ -99,6 +99,7 @@ expect('pipeline flaky set red', pipe({ flaky: true, flaky_severity: 'red' }), {
 const piped = (status: string, reason: string | null = null) => entity({ status, status_reason: reason })
 const repo = (f: Record<string, unknown>, pipelines: ReturnType<typeof entity>[] = [piped('green')]) => compute('sw_repository', { last_push: ago(1), archived: false, ...f }, pipelines)
 expect('repo no pipelines', repo({}, []), { status: 'grey', status_reason: 'no pipelines', pipelines_active: 0 })
+expect('repo no pipelines stays quiet with critical alerts', repo({ dependabot_critical: 3 }, []), { status: 'grey', status_reason: 'no pipelines' })
 expect('repo only grey pipelines', repo({}, [piped('grey', 'muted')]), { status: 'grey', status_reason: 'no pipelines' })
 expect('repo green', repo({}), { status: 'green', status_reason: null, pipelines_active: 1 })
 expect('repo green with a muted pipeline', repo({}, [piped('green'), piped('grey', 'muted')]), { status: 'green', pipelines_active: 1 })
