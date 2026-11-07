@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/rand"
-	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -19,9 +18,7 @@ import (
 	"time"
 
 	"github.com/dsswift/redgreen/internal/config"
-	"github.com/dsswift/redgreen/internal/provider"
 	"github.com/dsswift/redgreen/internal/provider/gitlab"
-	_ "modernc.org/sqlite"
 )
 
 // The one-time forge setup runs on the owner's machine. Each flow serves a
@@ -144,39 +141,36 @@ func printGitHub(id, slug, pem, secret string) {
 }
 
 // githubFromStore reads the app the old web app created through its setup
-// flow, sealed with SECRET_KEY in its settings table.
+// flow, and the accounts it was switched on for.
 func githubFromStore(path, key string) error {
-	box, err := provider.NewBox(key)
+	s, err := openOldStore(path, key)
 	if err != nil {
 		return err
 	}
-	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-	var raw string
-	if err := db.QueryRow(`SELECT value FROM settings WHERE key = 'github.app'`).Scan(&raw); err != nil {
-		return fmt.Errorf("no github app in %s: %w", path, err)
-	}
+	defer s.Close()
 	var app struct {
 		AppID         int64  `json:"appId"`
 		Slug          string `json:"slug"`
 		PrivateKey    string `json:"privateKey"`
 		WebhookSecret string `json:"webhookSecret"`
 	}
-	if err := json.Unmarshal([]byte(raw), &app); err != nil {
+	if err := s.setting("github.app", &app); err != nil {
 		return err
 	}
-	pem, err := box.Open(app.PrivateKey)
+	pem, err := s.open("private key", app.PrivateKey)
 	if err != nil {
-		return fmt.Errorf("private key: %w (is SECRET_KEY the old store's?)", err)
+		return err
 	}
-	secret, err := box.Open(app.WebhookSecret)
+	secret, err := s.open("webhook secret", app.WebhookSecret)
 	if err != nil {
-		return fmt.Errorf("webhook secret: %w", err)
+		return err
 	}
 	printGitHub(fmt.Sprint(app.AppID), app.Slug, pem, secret)
+	accounts, err := s.activeAccounts("github")
+	if err != nil {
+		return err
+	}
+	fmt.Println("GITHUB_ALLOWED_ACCOUNTS=" + strings.Join(accounts, ","))
 	return nil
 }
 
@@ -186,8 +180,17 @@ func githubFromStore(path, key string) error {
 func setupGitLab(args []string) error {
 	fs := flag.NewFlagSet("setup gitlab", flag.ContinueOnError)
 	port := fs.Int("port", 8765, "local port for the callback")
+	fromStore := fs.String("from-store", "", "read the OAuth application and its tokens from an old redgreen store instead, with SECRET_KEY")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *fromStore != "" {
+		s, err := openOldStore(*fromStore, os.Getenv("SECRET_KEY"))
+		if err != nil {
+			return err
+		}
+		defer s.Close()
+		return gitlabFromStore(os.Stdout, s)
 	}
 	cfg, err := config.Load()
 	if err != nil {
@@ -227,4 +230,23 @@ func setupGitLab(args []string) error {
 	fmt.Println("redgreen replaces the refresh token on first use and keeps the new one in its state, sealed with SECRET_KEY.")
 	fmt.Println("Point each project or group webhook at " + cfg.PublicURL + "/api/webhooks/gitlab with the secret token above.")
 	return nil
+}
+
+// setupAzureDevOps reads the service principal from an old redgreen store.
+// A new one is registered in Entra, not here; see the README.
+func setupAzureDevOps(args []string) error {
+	fs := flag.NewFlagSet("setup azuredevops", flag.ContinueOnError)
+	fromStore := fs.String("from-store", "", "the old redgreen store to read, with SECRET_KEY")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *fromStore == "" {
+		return errors.New("setup azuredevops reads an old store: pass --from-store")
+	}
+	s, err := openOldStore(*fromStore, os.Getenv("SECRET_KEY"))
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	return azureDevOpsFromStore(os.Stdout, s)
 }

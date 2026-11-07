@@ -20,7 +20,8 @@ var version = "dev"
 const usage = `usage:
   redgreen serve
   redgreen setup github [--org <org>] [--port 8765] [--from-store <old sqlite>]
-  redgreen setup gitlab [--port 8765]
+  redgreen setup gitlab [--port 8765] [--from-store <old sqlite>]
+  redgreen setup azuredevops --from-store <old sqlite>
   redgreen import-history <old sqlite>`
 
 func main() {
@@ -33,6 +34,8 @@ func main() {
 		err = setupGitHub(args[2:])
 	case len(args) >= 2 && args[0] == "setup" && args[1] == "gitlab":
 		err = setupGitLab(args[2:])
+	case len(args) >= 2 && args[0] == "setup" && args[1] == "azuredevops":
+		err = setupAzureDevOps(args[2:])
 	case len(args) == 2 && args[0] == "import-history":
 		err = importHistory(args[1])
 	default:
