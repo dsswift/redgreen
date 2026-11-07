@@ -55,6 +55,21 @@ All notable changes to this project will be documented in this file. See [standa
 * one language list and open fields ([dafe517](https://github.com/dsswift/redgreen/commit/dafe5174f0f73ab5ec834e686569882f91c35749))
 * push forge deployments to orrery ([185abff](https://github.com/dsswift/redgreen/commit/185abff406076d4b4a343b502ade925caf96625e))
 
+## [1.0.0](https://github.com/dsswift/redgreen/compare/v0.2.19...v1.0.0) (2026-11-07)
+
+### ⚠ BREAKING CHANGES
+
+* rebuild redgreen as a headless go service ([350baa1](https://github.com/dsswift/redgreen/commit/350baa104dd64195e34e1e0d12a94b1b15b0083a))
+
+### Features
+
+* rebuild redgreen as a headless go service ([350baa1](https://github.com/dsswift/redgreen/commit/350baa104dd64195e34e1e0d12a94b1b15b0083a))
+* check calculations with orrery's compiler ([f594561](https://github.com/dsswift/redgreen/commit/f5945610557ef94aacdf62ffda840d48e42021d3))
+
+### Bug Fixes
+
+* keep a repository with no pipelines quiet ([47b3ef6](https://github.com/dsswift/redgreen/commit/47b3ef6fab15c6c3bb659d8832e82b9d73ace24c))
+
 ## [0.2.19](https://github.com/dsswift/redgreen/compare/v0.2.18...v0.2.19) (2026-11-04)
 
 ### Bug Fixes
