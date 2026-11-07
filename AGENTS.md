@@ -1,129 +1,86 @@
 # redgreen
 
-Estate health board. Read `README.md` first.
+The forges' door into Orrery. Read `README.md` first.
 
 ## Shape
 
-- `src/shared` is the contract. The estate model in `model.ts` is provider
-  neutral; the rules in `rules.ts` are the only place a "reason to not be
-  green" is defined. Both are imported by the server and the web app.
-- `src/server` runs directly under Node 24 with no build step. Imports carry
-  the `.ts` extension. Only erasable TypeScript syntax is allowed: no enums,
-  no parameter properties.
-- `src/server/providers/<kind>` is one forge. A provider implements
-  `Provider` in `providers/provider.ts` and nothing outside that directory may
-  import forge-specific types. Adding a forge means adding a directory here
-  and registering it in `main.ts`. What every forge shares (`isStatus`,
-  `RateLimits`) lives directly under `providers/`.
-- `server/orrery.ts` pushes every repo to an Orrery hub as an
-  `sw_repository` entity when `ORRERY_URL` and `ORRERY_TOKEN` are set. `toRepository` is the
-  only place the mapping lives, and `REPOSITORY_BLUEPRINT` beside it is what
-  the hub is offered: a field written must be defined there. Blueprint ids
-  follow the blueprint standard (`sw_repository`, `sw_service`,
-  `sw_deployment`); each offer names its old id under `formerly`. `toDeployments`
-  and `DEPLOYMENT_BLUEPRINT` do the same for the deployments a forge records.
-  A provider that reads none leaves `deployments` off its snapshot. `toServices`
-  and `SERVICE_BLUEPRINT` do the same for services. Both carry the `dora_*`
-  fields of the last 30 days, from `Outcomes.measuresFor`; `dora_grade` is
-  the worst DORA band among the measures with data. It speaks plain HTTP; do
-  not add an SDK.
-- `server/describe.ts` writes redgreen's own description from the root
-  `orrery.yaml` when `ORRERY_URL` and `ORRERY_PUSH_TOKEN` are set. It reads
-  only `ORRERY_PUSH_TOKEN`. The image must carry `orrery.yaml` and the logo
-  its `icon` names (`logo.svg`); the logo is put with `PUT /v1/icons/{name}`
-  before the service that wears it.
-- `server/icons.ts` checks a logo the way the hub checks a custom icon, for
-  both writers. `readLogo` in `server/services.ts` reads the logo a repo's
-  root `orrery.yaml` names, at the same commit as its services; the store
-  keeps its bytes and the hash last put (`repo_icons`). The pusher puts it
-  only when that hash changed, and `toServices` gives the named service that
-  icon in place of its language's. A failed put writes that service with no
-  icon, never its language's, so describe and redgreen never fight.
-- `server/services.ts` finds the services in a repo from the files that build
-  them. `detectServices` is the only place a service is recognised; a
-  provider only hands over its file list and a reader through `files` on
-  `Provider`. The answer depends on nothing but the files at one commit, and
-  is read again only when the default branch moves or `SERVICE_RULES` does.
-  Bump `SERVICE_RULES` with any change to a rule.
-- Health is computed at read time from stored snapshots in
-  `server/health/evaluate.ts`. Changing a rule never needs a resync.
-- Outcomes are the four DORA measures. `shared/outcomes.ts` is the only place
-  they are defined: what makes a deployment a failure, how a restore is
-  timed, the bands, the rollups. It is pure and tested with fixtures. The
-  server keeps deployments in the `deployments` table and computes at read
-  time, like health. `server/outcomes/outcomes.ts` keeps what a forge records
-  and reads the commits each deployment carried through `commitsBetween` on
-  `Provider`, once per deployment, bounded per sync. `server/outcomes/orrery-reader.ts`
-  reads a hub's ArgoCD syncs with `ORRERY_READ_TOKEN`; the catalog's workload
-  `repo` URL, read by `repo-url.ts`, says which repository and folder a sync
-  belongs to. A sync whose revision lives in another repository is marked
-  `revisionElsewhere` and the repository's release tags stand in for it.
-- Incidents have one entry point, `server/outcomes/incidents.ts`; a source
-  registers there and `classify` takes what it returns. The one source is
-  `server/outcomes/dispatch.ts`, on when `DISPATCH_URL` and `DISPATCH_TOKEN`
-  are set: it reads a Dispatch desk's `GET /v1/incidents` and
-  `mapDispatchIncidents` ties each incident to a repository and folder
-  through the incident's Orrery workload and the catalog's workload `repo`
-  URL, the workloads the Orrery reader last read. Info incidents are left
-  out; an incident ends when it is mitigated, or resolved without that.
-- Telemetry is `server/telemetry.ts`: OTLP on when `OTEL_EXPORTER_OTLP_ENDPOINT`
-  is set, no-ops otherwise, so the code that measures never checks. The page
-  runs Faro from `web/telemetry.ts` and posts to `/api/telemetry`. An event
-  is `<thing>.<verb>` with values from a fixed list, like `outcomes.window.pick`.
-- `src/web` is a Vite React app served by the server from `dist/web` in
-  production and proxied from the Vite dev server locally. Every request goes
-  through `call` in `api.ts`. When an answer says the sign-in has ended,
-  `session.ts` reloads the page so the gate in front signs the person in
-  again; a view never handles that itself.
+- A headless Go service. Orrery is the board and the math; redgreen watches
+  the forges and writes facts. It never stores what Orrery stores and never
+  computes what Orrery can compute when a page is read.
+- `cmd/redgreen` is the command: `serve`, `setup github`, `setup gitlab`, and
+  `import-history`. Nothing else lives there but wiring.
+- `internal/provider` is the neutral model (`model.go`) and the `Provider`
+  interface. One package per forge under it (`github`, `gitlab`,
+  `azuredevops`). Nothing outside a forge's package knows its JSON. Adding a
+  forge means adding a package and listing it in `cmd/redgreen/serve.go`.
+- Every forge read goes through `provider.Get`, the conditional request: it
+  sends back the ETag, and a 304 reuses the facts kept from the first answer.
+  `provider.Once` is for an answer never asked for again, such as a tree at
+  one commit: it keeps nothing. Never call a forge around them.
+- `internal/state` is the SQLite file (pure Go, `modernc.org/sqlite`). It
+  keeps facts, never raw bodies: per URL the ETag and the normalised facts,
+  webhook delivery ids, runs for 60 days, forge deployments and the commits
+  each carried for 200 days, open issues, services per repository, and a
+  hash of what was last written. Losing it costs one sweep.
+- `internal/catalog` is what Orrery gets. `blueprints.go` offers the
+  blueprints; `expressions.go` holds every calculation and is the only place
+  one is written; `health.go` works out what only the runs can tell (a
+  failing streak, a missed schedule, a failed release build, a flaky
+  commit); `entities.go` maps a read onto entities. A field written must be
+  defined in its blueprint, and a calculation reads only fields before it
+  (`blueprints_test.go` checks both).
+- `internal/outcomes` works out each deployment's lead time, commit count,
+  fix-only flag, failed change, and restore time. Orrery aggregates them per
+  service and per team. `orrery.go` reads Argo CD syncs, apps, workloads, and
+  `it_incident` back from Orrery with `ORRERY_READ_TOKEN`; a workload's `repo`
+  URL, read by `repourl.go`, places a sync or an incident in a repository and
+  folder.
+- `internal/services` finds services from the files that build them. `Detect`
+  is the only place a service is recognised. Bump `Rules` with any change to
+  a rule, so every repository is read again.
+- `internal/sync` is the engine: the sweep, the workers, webhooks, and the
+  writes. `internal/describe` writes redgreen's own `orrery.yaml`.
+  `internal/telemetry` is logs, traces, and metrics.
 
 ## Rules of the house
 
-- Every GET to a forge goes through that forge's conditional-request client
-  (`providers/github/client.ts`, `providers/gitlab/client.ts`,
-  `providers/azuredevops/client.ts`). Do not bypass it; a sweep must stay free
-  when nothing changed. Azure DevOps sends an ETag on few resources, so there
-  a sweep is kept cheap by asking for less: prefer one call that covers a
-  project over one call per repo.
+- Health and DORA are Orrery calculations and aggregations. Never compute a
+  status, a rate, or a band in Go; push the fact and let the blueprint say
+  what it means. Run `scripts/check-expressions.mts` after changing one.
+- A blueprint offered to a hub that already has it only adds what it lacks.
+  A changed field definition or a new `status.field` does not reach that hub;
+  say so in the commit.
+- Health and push run on goroutines. `/healthz` never touches the state or a
+  forge.
 - Logs are JSON lines on stdout. Log both branches of any decision that
-  changes what the board shows.
-- No continuously repainting CSS animations in the web app.
-- The GitHub App is public by design so it installs on several orgs. Unknown
-  installations stay pending until approved in the UI. Keep that gate. GitLab
-  groups found through OAuth go through the same gate. An Azure DevOps
-  organization is named by a person in the settings or the environment, and
-  naming it is the approval.
-- GitLab access tokens expire in two hours. The provider refreshes them itself;
-  never cache one outside `providers/gitlab/provider.ts`.
-- Azure DevOps is read as an Entra service principal. Its tokens last about an
-  hour and have no refresh token; the provider asks for the next one itself.
-  Never cache one outside `providers/azuredevops/provider.ts`.
-- A repository's language is one of `LANGUAGES` in `shared/languages.ts`,
-  whatever the forge calls it. A provider that reads shares picks with
-  `mainLanguage`; `toRepository` puts every other one through
-  `listedLanguage`. Add a language to the list there, and to `NAMED` when a
-  forge calls it something else.
-- A service is pushed with the facts the files hold: its folder, its kind,
-  whether it has its own README, Dockerfile, and tests (`serviceFiles` in
-  `server/services.ts` is the only place that decides which service a file
-  belongs to),
-  its language, and its icon. What people decide about it, such as its tier,
-  lifecycle, description, or runbook, is never pushed; a pushed value would
-  fight their edits.
-- The blueprints offered to the hub leave their fields open. Locking a field
-  is the architect's choice, made in the hub.
-- `package.json` is the version of record.
+  changes what Orrery shows.
+- Accounts sync only when allowed: `GITHUB_ALLOWED_ACCOUNTS`,
+  `GITLAB_ALLOWED_ACCOUNTS`, or the organisations `AZURE_DEVOPS_ORGANIZATIONS`
+  names. Keep that gate; the GitHub App is public so it installs on several
+  orgs.
+- Forge tokens are renewed inside their provider and never cached elsewhere.
+  GitLab replaces its refresh token on every use, so the newest is kept in
+  the state, sealed with `SECRET_KEY`.
+- A service is written with what the files say: its folder, kind, language,
+  README, Dockerfile, tests, and icon. What people decide about it is never
+  pushed; a pushed value would fight their edits.
+- `VERSION` is the version of record.
 
 ## Releases
 
 Commit on `main` and land with `release-damnit land`. CI versions every `feat`
-and `fix` since the last release tag, tags it, and builds the tag's image.
-Never edit the version in `package.json`, `package-lock.json`, the manifest, or
-`CHANGELOG.md` by hand.
+and `fix` since the last release tag, tags it, and builds the tag's image,
+`ghcr.io/dsswift/redgreen`. Never edit `VERSION`, the manifest, or
+`CHANGELOG.md` by hand. The image build reads the private Orrery module with
+the `ORRERY_MODULE_TOKEN` secret.
 
 ## Checks
 
 ```bash
-npm run check
+go vet ./...
+go test ./...
+go run ./scripts/blueprints > /tmp/blueprints.json && node scripts/check-expressions.mts /tmp/blueprints.json
 ```
 
-Run it before every commit.
+The last one needs an Orrery checkout beside this repository with its
+dependencies installed. Run all three before every commit.
