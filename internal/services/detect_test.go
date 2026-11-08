@@ -324,3 +324,23 @@ func TestReadLogo(t *testing.T) {
 		}
 	}
 }
+
+func TestEachTerraformRootIsItsOwnService(t *testing.T) {
+	backend := "terraform {\n  backend \"azurerm\" {\n  }\n}\n"
+	files := map[string]string{
+		"infrastructure/cloudflare/versions.tf":                backend,
+		"infrastructure/cloudflare/dns.tf":                     `resource "x" "y" {}`,
+		"infrastructure/azure/terraform/versions.tf":           backend,
+		"infrastructure/azure/terraform/deploy--common.tf":     "",
+		"infrastructure/azure/terraform/modules/vault/main.tf": "",
+		"workloads/api/main.go":                                "package main\nfunc main() {}\n",
+		"workloads/api/Dockerfile":                             "FROM golang",
+	}
+	same(t, detect(files, "mono"), []string{
+		"workloads/api backend Go api",
+		"infrastructure/azure/terraform infrastructure Terraform azure",
+		"infrastructure/cloudflare infrastructure Terraform cloudflare",
+	})
+	// One root keeps the repository's one infrastructure service.
+	same(t, detect(map[string]string{"terraform/versions.tf": backend, "terraform/main.tf": ""}, "az-lz-shop"), []string{"terraform infrastructure Terraform az-lz-shop"})
+}

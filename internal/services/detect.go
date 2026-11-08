@@ -532,6 +532,18 @@ func find(paths []string, read Reader, repoName string) []Service {
 			infra = &infraKind{Infrastructure, "Other", k8s}
 		}
 	}
+	// Two or more Terraform roots, each keeping its own state, are separate
+	// projects: one service each, in its own folder.
+	if roots := terraformRoots(terraform, read); len(roots) > 1 && len(bicep) == 0 {
+		for _, r := range roots {
+			id := r
+			if slices.ContainsFunc(services, func(s Service) bool { return s.ID == r }) {
+				id = join(r, "infrastructure")
+			}
+			services = append(services, Service{ID: id, Path: r, Name: rootName(r, repoName), Type: Infrastructure, Language: "Terraform"})
+		}
+		infra = nil
+	}
 	if infra != nil {
 		p := commonDir(infra.files)
 		alone := len(services) == 0
@@ -696,6 +708,48 @@ func terraformRoot(files, terraform []string, read Reader) bool {
 		}
 	}
 	return false
+}
+
+// terraformRoots are the folders whose Terraform keeps state: a likely root
+// file there declares a backend. A root inside another is not counted.
+func terraformRoots(terraform []string, read Reader) []string {
+	var roots []string
+	n := 0
+	for _, f := range terraform {
+		if !reTfLikely.MatchString(baseOf(f)) {
+			continue
+		}
+		if n++; n > 200 {
+			break
+		}
+		if text, ok := read(f); ok && reTfBackend.MatchString(text) && !slices.Contains(roots, dirOf(f)) {
+			roots = append(roots, dirOf(f))
+		}
+	}
+	sort.Strings(roots)
+	var outer []string
+	for _, r := range roots {
+		if !slices.ContainsFunc(outer, func(o string) bool { return o == "" || strings.HasPrefix(r, o+"/") }) {
+			outer = append(outer, r)
+		}
+	}
+	return outer
+}
+
+// rootName names a Terraform root for its folder, or the folder above when
+// its own name only says it is Terraform.
+func rootName(dir, repoName string) string {
+	switch b := baseOf(dir); {
+	case dir == "":
+		return repoName
+	case b == "terraform" || b == "tf" || b == "infra" || b == "infrastructure":
+		if parent := dirOf(dir); parent != "" {
+			return baseOf(parent)
+		}
+		return repoName
+	default:
+		return b
+	}
 }
 
 var (
