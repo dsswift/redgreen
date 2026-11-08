@@ -57,6 +57,8 @@ type Provider struct {
 	token     string
 	expiresAt time.Time
 	languages map[string]languageEntry
+	// timelinesRead holds builds whose finished timeline was read, by when.
+	timelinesRead map[string]time.Time
 }
 
 type languageEntry struct {
@@ -76,7 +78,7 @@ func New(cfg Config, store *state.Store, client *http.Client, log *slog.Logger) 
 	if cfg.Login == "" {
 		cfg.Login = "https://login.microsoftonline.com"
 	}
-	p := &Provider{cfg: cfg, store: store, http: client, quotas: &provider.Quotas{Provider: "azuredevops", Remaining: "X-RateLimit-Remaining", Limit: "X-RateLimit-Limit"}, log: log, languages: map[string]languageEntry{}}
+	p := &Provider{cfg: cfg, store: store, http: client, quotas: &provider.Quotas{Provider: "azuredevops", Remaining: "X-RateLimit-Remaining", Limit: "X-RateLimit-Limit"}, log: log, languages: map[string]languageEntry{}, timelinesRead: map[string]time.Time{}}
 	if p.Configured() {
 		log.Info("azure devops credentials: service principal", "organizations", cfg.Organizations)
 	} else {

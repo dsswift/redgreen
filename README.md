@@ -103,8 +103,8 @@ redgreen serve
 - `POST /api/webhooks/gitlab`, checked by its secret token.
 
 A webhook reads its repository again ahead of the sweep and writes it.
-Azure DevOps sends none; the sweep covers it. GitHub's `workflow_job`
-reads nothing again: it is measured as telemetry, below. An App made
+Azure DevOps sends none; the sweep covers it, and reads GitLab's and Azure
+DevOps's CI jobs too. GitHub's `workflow_job` reads nothing again: it is measured as telemetry, below. An App made
 before redgreen asked for that event needs it ticked under the App's
 "Subscribe to events" (it needs no new permission).
 
@@ -153,10 +153,21 @@ sweep, per repository read, and per outbound call, and these metrics:
   to a runner taking it), and `redgreen.actions.job.duration` (on the
   runner), by `repository`, `runner` (`hosted` or `self-hosted`), and `os`,
   the finished ones by `conclusion` too; and `redgreen.actions.jobs.active`,
-  the jobs `queued` and `in_progress` now. From GitHub's `workflow_job`
-  webhook, for tracked repositories. A job is hosted when GitHub's own runner
-  group took it, or before one does, when it asks only for GitHub's images
-  (`ubuntu-*`, `windows-*`, `macos-*`). A restart forgets the jobs in flight.
+  the jobs `queued` and `in_progress` now, for tracked repositories.
+  - GitHub: from the `workflow_job` webhook. A job is hosted when GitHub's
+    own runner group took it, or before one does, when it asks only for
+    GitHub's images (`ubuntu-*`, `windows-*`, `macos-*`).
+  - GitLab: each sync reads the project's 50 newest jobs. The wait is
+    GitLab's `queued_duration`; a job waiting on an earlier stage, a person,
+    or a schedule is left out until it waits for a runner. Only gitlab.com's
+    shared runners are hosted; on a self-managed instance every runner is
+    the estate's.
+  - Azure DevOps: each sync reads the timelines of the builds queued in the
+    last three hours, a finished one once. A job is hosted when a Microsoft
+    agent (`Hosted Agent`, `Azure Pipelines n`) took it. Only a build's first
+    job has a known wait, from the build's queue time; the OS is `unknown`.
+  Polled states are only as fresh as the sweep. A restart forgets the jobs
+  in flight and never counts a job that had started before it again.
 - `http.server.request.duration`, `process.cpu.time`, `process.memory.usage`
 
 ## Development

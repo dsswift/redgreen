@@ -1,7 +1,9 @@
-// Package jobs follows CI jobs from their webhooks: which are waiting for a
-// runner, which are running, and what each change of state means for the
-// measures. It keeps no history; a restart forgets the jobs in flight, and
-// they count again from their next delivery.
+// Package jobs follows CI jobs from their webhooks and polls: which are
+// waiting for a runner, which are running, and what each change of state
+// means for the measures. It keeps no history. A poll lists jobs that
+// finished before a restart again, so a job that had started before the
+// tracker did is never measured again: its wait, and a finish before the
+// tracker started, were counted by the process before.
 package jobs
 
 import (
@@ -33,9 +35,10 @@ type Count struct {
 type Change struct {
 	Key
 	// Started is set the first time a job is seen on a runner; Wait is how
-	// long it waited for one.
-	Started bool
-	Wait    time.Duration
+	// long it waited for one, when WaitKnown.
+	Started   bool
+	WaitKnown bool
+	Wait      time.Duration
 	// Finished is set when a job completes; Ran is how long it ran, zero
 	// when it never reached a runner.
 	Finished   bool
@@ -53,12 +56,16 @@ type entry struct {
 
 // Tracker holds the jobs in flight.
 type Tracker struct {
-	mu   sync.Mutex
-	jobs map[string]*entry
+	mu    sync.Mutex
+	jobs  map[string]*entry
+	since time.Time
 }
 
-// New is an empty tracker.
+// New is an empty tracker that measures every job.
 func New() *Tracker { return &Tracker{jobs: map[string]*entry{}} }
+
+// Since is an empty tracker that measures nothing a job did before since.
+func Since(since time.Time) *Tracker { return &Tracker{jobs: map[string]*entry{}, since: since} }
 
 // Observe takes one delivery. Deliveries can arrive out of order, so a
 // state never moves a job backwards, and a job counts once.
@@ -70,6 +77,13 @@ func (t *Tracker) Observe(j provider.Job, now time.Time) Change {
 	if e == nil {
 		e = &entry{status: provider.JobQueued}
 		t.jobs[j.ID] = e
+		// Seen first after a restart: what it did before was measured then.
+		if !j.StartedAt.IsZero() && j.StartedAt.Before(t.since) {
+			e.started = true
+		}
+		if !j.CompletedAt.IsZero() && j.CompletedAt.Before(t.since) {
+			e.done = true
+		}
 	}
 	e.seen = now
 	if e.done {
@@ -83,7 +97,10 @@ func (t *Tracker) Observe(j provider.Job, now time.Time) Change {
 	if ran && !e.started {
 		e.started = true
 		c.Started = true
-		c.Wait = nonNegative(j.StartedAt.Sub(j.CreatedAt))
+		if !j.CreatedAt.IsZero() {
+			c.WaitKnown = true
+			c.Wait = nonNegative(j.StartedAt.Sub(j.CreatedAt))
+		}
 	}
 	switch j.Status {
 	case provider.JobInProgress:

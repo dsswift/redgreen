@@ -82,3 +82,37 @@ func TestAJobWhoseCompletionNeverCameIsForgotten(t *testing.T) {
 		t.Fatalf("%d stale jobs still active", n)
 	}
 }
+
+func TestAJobFinishedBeforeARestartIsNotCountedAgain(t *testing.T) {
+	tr := Since(t0)
+	j := job(provider.JobCompleted, t0.Add(-2*time.Minute), t0.Add(-time.Minute))
+	j.CreatedAt = t0.Add(-3 * time.Minute)
+	if c := tr.Observe(j, t0); c.Started || c.WaitKnown || c.Finished {
+		t.Fatalf("a job finished before the restart counted again: %+v", c)
+	}
+}
+
+func TestAJobRunningAcrossARestartCountsOnlyItsFinish(t *testing.T) {
+	tr := Since(t0)
+	j := job(provider.JobInProgress, t0.Add(-time.Minute), time.Time{})
+	j.CreatedAt = t0.Add(-2 * time.Minute)
+	if c := tr.Observe(j, t0); c.Started || c.WaitKnown {
+		t.Fatalf("its wait counted again: %+v", c)
+	}
+	if active(tr, provider.JobInProgress) != 1 {
+		t.Fatal("it must still count as running")
+	}
+	c := tr.Observe(job(provider.JobCompleted, t0.Add(-time.Minute), t0.Add(time.Minute)), t0)
+	if !c.Finished || c.Ran != 2*time.Minute {
+		t.Fatalf("its finish = %+v", c)
+	}
+}
+
+func TestAJobWithNoQueueTimeStartsWithoutAWait(t *testing.T) {
+	tr := New()
+	j := job(provider.JobInProgress, t0.Add(time.Minute), time.Time{})
+	j.CreatedAt = time.Time{}
+	if c := tr.Observe(j, t0); !c.Started || c.WaitKnown {
+		t.Fatalf("started = %+v", c)
+	}
+}

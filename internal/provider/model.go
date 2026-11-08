@@ -262,8 +262,9 @@ const (
 	RunnerSelfHosted = "self-hosted"
 )
 
-// Job is one CI job as a webhook reported it.
+// Job is one CI job as a webhook or a poll reported it.
 type Job struct {
+	// ID is unique across forges.
 	ID   string
 	Repo string
 	// Status is JobQueued, JobInProgress, or JobCompleted.
@@ -272,8 +273,10 @@ type Job struct {
 	// Runner is RunnerHosted or RunnerSelfHosted: the runner that took the
 	// job, or before one does, what the job asked for.
 	Runner string
-	// OS is linux, macos, or windows.
-	OS          string
+	// OS is linux, macos, windows, or unknown when the forge does not say.
+	OS string
+	// CreatedAt is when the job started waiting for a runner, zero when the
+	// forge does not say; its wait is then not measured.
 	CreatedAt   time.Time
 	StartedAt   time.Time
 	CompletedAt time.Time
@@ -293,6 +296,13 @@ type Provider interface {
 	// Nil with no error when the forge cannot say.
 	CommitsBetween(ctx context.Context, a Account, r *Repo, base, head string) ([]Commit, error)
 	Quotas() []telemetry.Quota
+}
+
+// JobReader is a forge whose CI jobs are read by polling, because it sends
+// no job events.
+type JobReader interface {
+	// Jobs lists the repository's recent jobs, newest first.
+	Jobs(ctx context.Context, a Account, r *Repo) ([]Job, error)
 }
 
 // Webhooks is a forge that sends webhooks.

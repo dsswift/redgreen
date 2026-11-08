@@ -80,7 +80,7 @@ func New(o Options) *Engine {
 		o.Concurrency = 1
 	}
 	e := &Engine{
-		o: o, jobsInFlight: cijobs.New(), offer: &offer{client: o.Push, log: o.Log},
+		o: o, jobsInFlight: cijobs.Since(time.Now()), offer: &offer{client: o.Push, log: o.Log},
 		jobs: make(chan job, 1024), urgent: make(chan job, 256), again: make(chan struct{}, 1),
 		repos: map[string]*tracked{}, byName: map[string]string{}, debounce: map[string]*time.Timer{}, delivered: map[string]time.Time{},
 	}
@@ -282,6 +282,7 @@ func (e *Engine) syncRepo(ctx context.Context, key string) error {
 			e.o.Log.WarnContext(ctx, "deployment not kept", "repo", repo.FullName, "error", err)
 		}
 	}
+	e.readJobs(ctx, p, t, repo)
 	found := e.services(ctx, p, t, repo)
 	e.mu.Lock()
 	if live := e.repos[key]; live != nil {
@@ -386,8 +387,29 @@ func (e *Engine) job(ctx context.Context, kind provider.Kind, j provider.Job) {
 		e.o.Log.InfoContext(ctx, "job in a repo that is not tracked; not measured", "provider", kind, "repo", j.Repo, "job", j.ID)
 		return
 	}
+	e.measure(ctx, j)
+}
+
+// readJobs measures the jobs of a forge that sends no job events. A failed
+// read loses nothing: the next sync lists the same jobs.
+func (e *Engine) readJobs(ctx context.Context, p provider.Provider, t *tracked, repo *provider.Repo) {
+	r, ok := p.(provider.JobReader)
+	if !ok {
+		return
+	}
+	jobs, err := r.Jobs(ctx, t.account, repo)
+	if err != nil {
+		e.o.Log.WarnContext(ctx, "jobs not read; measured on the next sync", "repo", repo.FullName, "error", err)
+		return
+	}
+	for _, j := range jobs {
+		e.measure(ctx, j)
+	}
+}
+
+func (e *Engine) measure(ctx context.Context, j provider.Job) {
 	c := e.jobsInFlight.Observe(j, time.Now())
-	if c.Started {
+	if c.WaitKnown {
 		e.o.Tel.JobStarted(ctx, c.Repo, c.Runner, c.OS, c.Wait)
 	}
 	if c.Finished {
