@@ -257,3 +257,39 @@ func TestFilesKeepNothingForOneCommit(t *testing.T) {
 		t.Error("a blob is addressed by its content and asked for again on the next commit; it is kept")
 	}
 }
+
+func TestWebhookReportsAJobWithoutReadingItsRepoAgain(t *testing.T) {
+	key, _ := ParseKey(testKey)
+	p := &Provider{cfg: Config{WebhookSecret: "s3cret"}, app: &appAuth{key: key}}
+	deliver := func(job string) provider.Delivery {
+		body := []byte(`{"repository":{"full_name":"acme/app"},"workflow_job":` + job + `}`)
+		m := hmac.New(sha256.New, []byte("s3cret"))
+		m.Write(body)
+		d, err := p.Webhook(context.Background(), http.Header{"X-Hub-Signature-256": {"sha256=" + hex.EncodeToString(m.Sum(nil))}, "X-Github-Event": {"workflow_job"}}, body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(d.Repos) != 0 {
+			t.Fatalf("a job delivery asked to read %v again", d.Repos)
+		}
+		return d
+	}
+	cases := []struct {
+		name, job, runner, os, status string
+		started                       bool
+	}{
+		{"queued for a hosted image", `{"id":7,"status":"queued","created_at":"2026-11-08T12:00:00Z","started_at":"2026-11-08T12:00:00Z","labels":["ubuntu-latest"]}`, provider.RunnerHosted, "linux", provider.JobQueued, false},
+		{"queued for a self-hosted label", `{"id":7,"status":"queued","created_at":"2026-11-08T12:00:00Z","labels":["house"]}`, provider.RunnerSelfHosted, "linux", provider.JobQueued, false},
+		{"taken by a hosted runner", `{"id":7,"status":"in_progress","created_at":"2026-11-08T12:00:00Z","started_at":"2026-11-08T12:00:30Z","labels":["macos-15"],"runner_group_name":"GitHub Actions"}`, provider.RunnerHosted, "macos", provider.JobInProgress, true},
+		{"taken by a self-hosted runner", `{"id":7,"status":"completed","conclusion":"success","created_at":"2026-11-08T12:00:00Z","started_at":"2026-11-08T12:00:30Z","completed_at":"2026-11-08T12:02:00Z","labels":["house"],"runner_group_name":"Default"}`, provider.RunnerSelfHosted, "linux", provider.JobCompleted, true},
+	}
+	for _, c := range cases {
+		j := deliver(c.job).Job
+		if j == nil || j.ID != "7" || j.Repo != "acme/app" || j.Runner != c.runner || j.OS != c.os || j.Status != c.status || j.StartedAt.IsZero() == c.started {
+			t.Errorf("%s: job = %+v", c.name, j)
+		}
+	}
+	if d := deliver(`{"id":7,"status":"waiting","labels":["ubuntu-latest"]}`); d.Job != nil {
+		t.Errorf("a job waiting for approval was reported: %+v", d.Job)
+	}
+}

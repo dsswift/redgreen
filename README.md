@@ -103,7 +103,10 @@ redgreen serve
 - `POST /api/webhooks/gitlab`, checked by its secret token.
 
 A webhook reads its repository again ahead of the sweep and writes it.
-Azure DevOps sends none; the sweep covers it.
+Azure DevOps sends none; the sweep covers it. GitHub's `workflow_job`
+reads nothing again: it is measured as telemetry, below. An App made
+before redgreen asked for that event needs it ticked under the App's
+"Subscribe to events" (it needs no new permission).
 
 ### One-time setup
 
@@ -146,6 +149,14 @@ sweep, per repository read, and per outbound call, and these metrics:
 - `redgreen.push.entities` by blueprint and outcome
 - `redgreen.sweep.last_success`, the time of the last sweep that reached every forge
 - `redgreen.orrery.describe` by outcome
+- `redgreen.actions.jobs` (finished), `redgreen.actions.job.wait` (queued
+  to a runner taking it), and `redgreen.actions.job.duration` (on the
+  runner), by `repository`, `runner` (`hosted` or `self-hosted`), and `os`,
+  the finished ones by `conclusion` too; and `redgreen.actions.jobs.active`,
+  the jobs `queued` and `in_progress` now. From GitHub's `workflow_job`
+  webhook, for tracked repositories. A job is hosted when GitHub's own runner
+  group took it, or before one does, when it asks only for GitHub's images
+  (`ubuntu-*`, `windows-*`, `macos-*`). A restart forgets the jobs in flight.
 - `http.server.request.duration`, `process.cpu.time`, `process.memory.usage`
 
 ## Development

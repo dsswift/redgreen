@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -363,15 +364,101 @@ func (p *Provider) Webhook(_ context.Context, h http.Header, body []byte) (provi
 		Repository *struct {
 			FullName string `json:"full_name"`
 		} `json:"repository"`
+		WorkflowJob *ghJob `json:"workflow_job"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return provider.Delivery{}, fmt.Errorf("payload: %w", err)
+	}
+	if d.Event == "workflow_job" {
+		// A job changes state three times a run; the workflow_run delivery
+		// already reads the repository again, so a job only reports itself.
+		if payload.WorkflowJob != nil && payload.Repository != nil {
+			d.Job = payload.WorkflowJob.job(payload.Repository.FullName)
+		}
+		return d, nil
 	}
 	if payload.Repository != nil {
 		d.Repos = []string{payload.Repository.FullName}
 	}
 	d.Rediscover = d.Event == "installation" || d.Event == "installation_repositories" || d.Event == "repository"
 	return d, nil
+}
+
+// ghJob is the workflow_job of a webhook.
+type ghJob struct {
+	ID              int64      `json:"id"`
+	Status          string     `json:"status"`
+	Conclusion      string     `json:"conclusion"`
+	CreatedAt       time.Time  `json:"created_at"`
+	StartedAt       *time.Time `json:"started_at"`
+	CompletedAt     *time.Time `json:"completed_at"`
+	Labels          []string   `json:"labels"`
+	RunnerGroupName string     `json:"runner_group_name"`
+}
+
+// hostedGroup is the runner group GitHub's own machines belong to.
+const hostedGroup = "GitHub Actions"
+
+// job is the neutral job, or nil for a state that says nothing about
+// runners, such as waiting for an environment's approval.
+func (j *ghJob) job(repo string) *provider.Job {
+	switch j.Status {
+	case provider.JobQueued, provider.JobInProgress, provider.JobCompleted:
+	default:
+		return nil
+	}
+	out := &provider.Job{ID: strconv.FormatInt(j.ID, 10), Repo: repo, Status: j.Status, Conclusion: j.Conclusion,
+		Runner: j.runner(), OS: jobOS(j.Labels), CreatedAt: j.CreatedAt}
+	if j.StartedAt != nil && j.Status != provider.JobQueued {
+		out.StartedAt = *j.StartedAt
+	}
+	if j.CompletedAt != nil {
+		out.CompletedAt = *j.CompletedAt
+	}
+	return out
+}
+
+// runner is the runner group that took the job, or before one has, what
+// its labels ask for: a job asking only for GitHub's images is hosted.
+func (j *ghJob) runner() string {
+	if j.RunnerGroupName != "" {
+		if j.RunnerGroupName == hostedGroup {
+			return provider.RunnerHosted
+		}
+		return provider.RunnerSelfHosted
+	}
+	if len(j.Labels) == 0 {
+		return provider.RunnerSelfHosted
+	}
+	for _, l := range j.Labels {
+		if !hostedImage(l) {
+			return provider.RunnerSelfHosted
+		}
+	}
+	return provider.RunnerHosted
+}
+
+func hostedImage(label string) bool {
+	l := strings.ToLower(label)
+	for _, p := range []string{"ubuntu-", "windows-", "macos-"} {
+		if strings.HasPrefix(l, p) {
+			return true
+		}
+	}
+	return false
+}
+
+func jobOS(labels []string) string {
+	for _, l := range labels {
+		l = strings.ToLower(l)
+		switch {
+		case strings.HasPrefix(l, "macos"):
+			return "macos"
+		case strings.HasPrefix(l, "windows"):
+			return "windows"
+		}
+	}
+	return "linux"
 }
 
 // ParseSchedules reads the schedules a workflow file declares under

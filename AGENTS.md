@@ -38,6 +38,9 @@ The forges' door into Orrery. Read `README.md` first.
 - `internal/services` finds services from the files that build them. `Detect`
   is the only place a service is recognised. Bump `Rules` with any change to
   a rule, so every repository is read again.
+- `internal/jobs` follows CI jobs from GitHub's `workflow_job` webhook for
+  telemetry only: jobs waiting and running, wait and run times. Nothing in
+  it reaches Orrery.
 - `internal/sync` is the engine: the sweep, the workers, webhooks, and the
   writes. `internal/describe` writes redgreen's own `orrery.yaml`.
   `internal/telemetry` is logs, traces, and metrics.

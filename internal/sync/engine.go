@@ -15,6 +15,7 @@ import (
 
 	"github.com/dsswift/orrery/sdk"
 	"github.com/dsswift/redgreen/internal/catalog"
+	cijobs "github.com/dsswift/redgreen/internal/jobs"
 	"github.com/dsswift/redgreen/internal/outcomes"
 	"github.com/dsswift/redgreen/internal/provider"
 	"github.com/dsswift/redgreen/internal/services"
@@ -64,6 +65,8 @@ type Engine struct {
 	byName    map[string]string
 	debounce  map[string]*time.Timer
 	delivered map[string]time.Time
+
+	jobsInFlight *cijobs.Tracker
 }
 
 type job struct {
@@ -76,11 +79,15 @@ func New(o Options) *Engine {
 	if o.Concurrency < 1 {
 		o.Concurrency = 1
 	}
-	return &Engine{
-		o: o, offer: &offer{client: o.Push, log: o.Log},
+	e := &Engine{
+		o: o, jobsInFlight: cijobs.New(), offer: &offer{client: o.Push, log: o.Log},
 		jobs: make(chan job, 1024), urgent: make(chan job, 256), again: make(chan struct{}, 1),
 		repos: map[string]*tracked{}, byName: map[string]string{}, debounce: map[string]*time.Timer{}, delivered: map[string]time.Time{},
 	}
+	if o.Tel != nil {
+		o.Tel.WatchJobs(e.activeJobs)
+	}
+	return e
 }
 
 func nameKey(kind provider.Kind, fullName string) string {
@@ -342,6 +349,9 @@ func (e *Engine) Webhook(ctx context.Context, kind provider.Kind, d provider.Del
 	}
 	e.o.Tel.Webhook(ctx, string(kind), "accepted")
 	e.o.Log.InfoContext(ctx, "webhook received", "provider", kind, "event", d.Event, "delivery", d.ID, "repos", d.Repos, "rediscover", d.Rediscover)
+	if d.Job != nil {
+		e.job(ctx, kind, *d.Job)
+	}
 	for _, name := range d.Repos {
 		e.mu.Lock()
 		key, ok := e.byName[nameKey(kind, name)]
@@ -365,6 +375,33 @@ func (e *Engine) Webhook(ctx context.Context, kind provider.Kind, d provider.Del
 		default:
 		}
 	}
+}
+
+// job measures one CI job's change of state, for a tracked repository only.
+func (e *Engine) job(ctx context.Context, kind provider.Kind, j provider.Job) {
+	e.mu.Lock()
+	_, ok := e.byName[nameKey(kind, j.Repo)]
+	e.mu.Unlock()
+	if !ok {
+		e.o.Log.InfoContext(ctx, "job in a repo that is not tracked; not measured", "provider", kind, "repo", j.Repo, "job", j.ID)
+		return
+	}
+	c := e.jobsInFlight.Observe(j, time.Now())
+	if c.Started {
+		e.o.Tel.JobStarted(ctx, c.Repo, c.Runner, c.OS, c.Wait)
+	}
+	if c.Finished {
+		e.o.Tel.JobFinished(ctx, c.Repo, c.Runner, c.OS, c.Conclusion, c.Ran)
+	}
+}
+
+func (e *Engine) activeJobs() []telemetry.ActiveJobs {
+	counts := e.jobsInFlight.Active(time.Now())
+	out := make([]telemetry.ActiveJobs, 0, len(counts))
+	for _, c := range counts {
+		out = append(out, telemetry.ActiveJobs{Repo: c.Repo, Runner: c.Runner, OS: c.OS, Status: c.Status, N: c.N})
+	}
+	return out
 }
 
 // refresh reads one repository ahead of the sweep and writes it.

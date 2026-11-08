@@ -245,6 +245,38 @@ type Delivery struct {
 	Repos []string
 	// Rediscover is set when accounts or repository lists may have changed.
 	Rediscover bool
+	// Job is set when the delivery reports a CI job changing state.
+	Job *Job
+}
+
+// Job states.
+const (
+	JobQueued     = "queued"
+	JobInProgress = "in_progress"
+	JobCompleted  = "completed"
+)
+
+// Runner kinds: the forge's own machines, or runners the estate hosts.
+const (
+	RunnerHosted     = "hosted"
+	RunnerSelfHosted = "self-hosted"
+)
+
+// Job is one CI job as a webhook reported it.
+type Job struct {
+	ID   string
+	Repo string
+	// Status is JobQueued, JobInProgress, or JobCompleted.
+	Status     string
+	Conclusion string
+	// Runner is RunnerHosted or RunnerSelfHosted: the runner that took the
+	// job, or before one does, what the job asked for.
+	Runner string
+	// OS is linux, macos, or windows.
+	OS          string
+	CreatedAt   time.Time
+	StartedAt   time.Time
+	CompletedAt time.Time
 }
 
 // Provider is a forge. Everything past it is neutral.

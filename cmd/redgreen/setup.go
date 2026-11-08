@@ -90,7 +90,7 @@ func setupGitHub(args []string) error {
 			"actions": "read", "administration": "read", "checks": "read", "contents": "read", "deployments": "read", "issues": "read",
 			"metadata": "read", "pull_requests": "read", "statuses": "read", "vulnerability_alerts": "read", "security_events": "read",
 		},
-		"default_events": []string{"check_suite", "code_scanning_alert", "create", "delete", "dependabot_alert", "issues", "pull_request", "push", "release", "repository", "workflow_run", "deployment_status"},
+		"default_events": []string{"check_suite", "code_scanning_alert", "create", "delete", "dependabot_alert", "issues", "pull_request", "push", "release", "repository", "workflow_run", "workflow_job", "deployment_status"},
 	})
 	action := "https://github.com/settings/apps/new"
 	if *org != "" {

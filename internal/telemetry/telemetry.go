@@ -35,6 +35,13 @@ type Quota struct {
 	Limit     float64
 }
 
+// ActiveJobs is how many CI jobs share a repository, runner kind, OS, and
+// status (queued or in_progress).
+type ActiveJobs struct {
+	Repo, Runner, OS, Status string
+	N                        int
+}
+
 // Telemetry holds the instruments. The zero of every method is safe to call
 // before Setup: the global providers answer with no-ops.
 type Telemetry struct {
@@ -45,7 +52,11 @@ type Telemetry struct {
 	pushes       metric.Int64Counter
 	describes    metric.Int64Counter
 	requests     metric.Float64Histogram
+	jobs         metric.Int64Counter
+	jobWait      metric.Float64Histogram
+	jobRun       metric.Float64Histogram
 	lastSweep    atomic.Int64
+	activeJobs   atomic.Pointer[func() []ActiveJobs]
 	quotas       atomic.Pointer[func() []Quota]
 	shutdown     []func(context.Context) error
 }
@@ -94,6 +105,15 @@ func Setup(ctx context.Context, endpoint, service, version string, log *slog.Log
 	keep(err)
 	t.describes, err = m.Int64Counter(Service+".orrery.describe", metric.WithDescription("Writes of the app's own description to Orrery, by outcome."))
 	keep(err)
+	// A job waits seconds for a runner on a good day and an hour on a bad
+	// one, and runs from seconds to hours.
+	jobBuckets := metric.WithExplicitBucketBoundaries(1, 2, 5, 10, 20, 30, 60, 120, 300, 600, 1200, 1800, 3600, 7200)
+	t.jobs, err = m.Int64Counter(Service+".actions.jobs", metric.WithDescription("CI jobs finished, by repository, runner kind, OS, and conclusion."))
+	keep(err)
+	t.jobWait, err = m.Float64Histogram(Service+".actions.job.wait", metric.WithUnit("s"), jobBuckets, metric.WithDescription("From a CI job queued to a runner taking it, by repository, runner kind, and OS."))
+	keep(err)
+	t.jobRun, err = m.Float64Histogram(Service+".actions.job.duration", metric.WithUnit("s"), jobBuckets, metric.WithDescription("How long a CI job ran on its runner, by repository, runner kind, OS, and conclusion."))
+	keep(err)
 	t.requests, err = m.Float64Histogram("http.server.request.duration", metric.WithUnit("s"), metric.WithDescription("Served requests by route, method, and status."))
 	keep(err)
 
@@ -102,6 +122,8 @@ func Setup(ctx context.Context, endpoint, service, version string, log *slog.Log
 	quotaLeft, err := m.Float64ObservableGauge(Service+".quota.remaining", metric.WithDescription("Forge API calls left in the current rate-limit window, the lowest per provider."))
 	keep(err)
 	quotaLimit, err := m.Float64ObservableGauge(Service+".quota.limit", metric.WithDescription("The forge's rate limit for the window, per provider."))
+	keep(err)
+	active, err := m.Int64ObservableGauge(Service+".actions.jobs.active", metric.WithDescription("CI jobs waiting for a runner (queued) and running (in_progress) now, by repository, runner kind, and OS."))
 	keep(err)
 	sweep, err := m.Int64ObservableGauge(Service+".sweep.last_success", metric.WithUnit("s"), metric.WithDescription("Unix time the last sweep that reached every configured forge finished."))
 	keep(err)
@@ -116,6 +138,11 @@ func Setup(ctx context.Context, endpoint, service, version string, log *slog.Log
 		o.ObserveInt64(build, 1, metric.WithAttributes(attribute.String("version", version)))
 		if at := t.lastSweep.Load(); at > 0 {
 			o.ObserveInt64(sweep, at)
+		}
+		if f := t.activeJobs.Load(); f != nil {
+			for _, a := range (*f)() {
+				o.ObserveInt64(active, int64(a.N), metric.WithAttributes(attribute.String("repository", a.Repo), attribute.String("runner", a.Runner), attribute.String("os", a.OS), attribute.String("status", a.Status)))
+			}
 		}
 		if f := t.quotas.Load(); f != nil {
 			for _, q := range lowest((*f)()) {
@@ -134,7 +161,7 @@ func Setup(ctx context.Context, endpoint, service, version string, log *slog.Log
 		o.ObserveInt64(mem, int64(ms.HeapInuse), metric.WithAttributes(attribute.String("process.memory.kind", "heap")))
 		o.ObserveInt64(mem, int64(ms.Sys), metric.WithAttributes(attribute.String("process.memory.kind", "total")))
 		return nil
-	}, build, quotaLeft, quotaLimit, sweep, cpu, mem)
+	}, build, quotaLeft, quotaLimit, active, sweep, cpu, mem)
 	if err != nil {
 		return nil, err
 	}
@@ -171,6 +198,24 @@ func (t *Telemetry) Shutdown(ctx context.Context) error {
 
 // WatchQuotas reads the forges' rate limits on every export.
 func (t *Telemetry) WatchQuotas(f func() []Quota) { t.quotas.Store(&f) }
+
+// WatchJobs reads the CI jobs in flight on every export.
+func (t *Telemetry) WatchJobs(f func() []ActiveJobs) { t.activeJobs.Store(&f) }
+
+// JobStarted records how long a CI job waited for its runner.
+func (t *Telemetry) JobStarted(ctx context.Context, repo, runner, os string, wait time.Duration) {
+	t.jobWait.Record(ctx, wait.Seconds(), metric.WithAttributes(attribute.String("repository", repo), attribute.String("runner", runner), attribute.String("os", os)))
+}
+
+// JobFinished counts a finished CI job and, when it reached a runner, how
+// long it ran.
+func (t *Telemetry) JobFinished(ctx context.Context, repo, runner, os, conclusion string, ran time.Duration) {
+	attrs := metric.WithAttributes(attribute.String("repository", repo), attribute.String("runner", runner), attribute.String("os", os), attribute.String("conclusion", conclusion))
+	t.jobs.Add(ctx, 1, attrs)
+	if ran > 0 {
+		t.jobRun.Record(ctx, ran.Seconds(), attrs)
+	}
+}
 
 // SweepSucceeded records the end of a sweep that reached every forge.
 func (t *Telemetry) SweepSucceeded(at time.Time) { t.lastSweep.Store(at.Unix()) }
