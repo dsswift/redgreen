@@ -55,6 +55,12 @@ All notable changes to this project will be documented in this file. See [standa
 * one language list and open fields ([dafe517](https://github.com/dsswift/redgreen/commit/dafe5174f0f73ab5ec834e686569882f91c35749))
 * push forge deployments to orrery ([185abff](https://github.com/dsswift/redgreen/commit/185abff406076d4b4a343b502ade925caf96625e))
 
+## [1.1.1](https://github.com/dsswift/redgreen/compare/v1.1.0...v1.1.1) (2026-11-08)
+
+### Bug Fixes
+
+* give each terraform root its own service ([0a2b857](https://github.com/dsswift/redgreen/commit/0a2b857d0b5c15e67957c612229196cecdcf4a97))
+
 ## [1.1.0](https://github.com/dsswift/redgreen/compare/v1.0.1...v1.1.0) (2026-11-07)
 
 ### Features
