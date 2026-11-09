@@ -295,11 +295,15 @@ func TestReadDescriptor(t *testing.T) {
 	read := func(files map[string][]byte) (*Descriptor, *Icon, string) {
 		m := memFiles{commit: "c", files: files}
 		paths, _ := m.List(ctx)
-		d, icon, problem, err := readDescriptor(ctx, m, paths, "github/example/app")
-		if err != nil {
+		f := &Found{}
+		if err := f.describe(ctx, m, paths, "github/example/app"); err != nil {
 			t.Fatal(err)
 		}
-		return d, icon, problem
+		problem := strings.Join(f.Problems, "; ")
+		if len(f.Descriptions) == 0 {
+			return nil, nil, problem
+		}
+		return &f.Descriptions[0].Descriptor, f.Descriptions[0].Logo, problem
 	}
 	d, icon, _ := read(map[string][]byte{"orrery.yaml": []byte("service: GitHub/Example/App/cmd/app\nicon: {name: app, file: ./brand/logo.svg}\nprovides: [{id: v1, title: API, kind: rest, spec: api/openapi.yaml}]\nconsumes: [github/acme/hub/catalog]\nfields: {category: Portal}\n"), "brand/logo.svg": svg})
 	if d == nil || d.Service != "github/example/app/cmd/app" || len(d.Provides) != 1 || d.Consumes[0] != "github/acme/hub/catalog" || d.Fields["category"] != "Portal" {
@@ -333,6 +337,36 @@ func TestReadDescriptor(t *testing.T) {
 		if _, _, problem := read(files); !strings.Contains(problem, want) {
 			t.Errorf("problem %q, want it to say %q", problem, want)
 		}
+	}
+}
+
+func TestEachServiceMayHaveItsOwnDescriptor(t *testing.T) {
+	ctx := context.Background()
+	m := memFiles{commit: "c", files: map[string][]byte{
+		"orrery.yaml":               []byte("service: github/acme/mono\n"),
+		"apps/shop/go.mod":          []byte("module shop\n"),
+		"apps/shop/main.go":         []byte("package main\nfunc main() {}\n"),
+		"apps/shop/orrery.yaml":     []byte("service: github/acme/mono/apps/shop\nprovides: [{id: v1, title: Shop, kind: rest}]\n"),
+		"apps/cart/go.mod":          []byte("module cart\n"),
+		"apps/cart/main.go":         []byte("package main\nfunc main() {}\n"),
+		"apps/cart/orrery.yaml":     []byte("service: github/acme/mono/apps/shop\n"),
+		"deploy/alerts/orrery.yaml": []byte("groups: []\n"),
+	}}
+	found, _, err := Read(ctx, m, "github/acme/mono", "mono", nil, Bots{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var keys []string
+	for _, d := range found.Descriptions {
+		keys = append(keys, d.File+"="+d.Service)
+	}
+	same(t, keys, []string{"orrery.yaml=github/acme/mono", "apps/shop/orrery.yaml=github/acme/mono/apps/shop"})
+	same(t, len(found.Problems), 1)
+	if !strings.Contains(found.Problems[0], `apps/cart/orrery.yaml: orrery.yaml: service "github/acme/mono/apps/shop" is not "github/acme/mono/apps/cart" or a folder in it`) {
+		t.Errorf("problems = %v", found.Problems)
+	}
+	if found.Describing("github/acme/mono/apps/shop") == nil || found.Describing("github/acme/mono/apps/cart") != nil {
+		t.Error("Describing finds a service by its key")
 	}
 }
 

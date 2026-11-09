@@ -68,7 +68,7 @@ type written struct {
 	pipelines  []sdk.Entity
 	services   []sdk.Entity
 	apis       []sdk.Entity
-	placement  *sdk.Entity
+	placements []sdk.Entity
 	issues     []sdk.Entity
 }
 
@@ -89,49 +89,52 @@ func (e *Engine) entities(ctx context.Context, key string, now time.Time) (writt
 		out.pipelines = append(out.pipelines, catalog.PipelineEntity(r, p, catalog.Judge(p, r.DefaultBranch, history, release, now)))
 	}
 	if t.found != nil {
-		out.services = catalog.ServiceEntities(r, t.found, e.logo(ctx, r, t.found))
+		out.services = catalog.ServiceEntities(r, t.found, e.logos(ctx, r, t.found))
 		out.apis = catalog.APIEntities(r, t.found)
-		out.placement = catalog.Placement(t.found)
+		out.placements = catalog.Placements(t.found)
 	}
 	out.issues = e.issues(ctx, key, r, now)
 	return out, true
 }
 
-// logo puts the logo a repository names when its bytes changed since the
-// last put, and answers its name. A failed put is logged and answers "", so
-// the service is written without an icon and keeps whatever icon the hub has.
-func (e *Engine) logo(ctx context.Context, r *provider.Repo, found *services.Found) string {
-	icon := found.Icon
-	if icon == nil {
-		return ""
+// logos puts each logo a repository's orrery.yaml files name when its
+// bytes changed since the last put, and answers the names the hub holds. A
+// failed put is logged and its name left out, so that service is written
+// without an icon and keeps whatever icon the hub has.
+func (e *Engine) logos(ctx context.Context, r *provider.Repo, found *services.Found) map[string]string {
+	held := map[string]string{}
+	for _, d := range found.Descriptions {
+		icon := d.Logo
+		if icon == nil {
+			continue
+		}
+		if had, _ := e.o.Store.Written(ctx, "icon", icon.Name); had == icon.SHA256 {
+			held[icon.Name] = icon.Name
+			continue
+		}
+		if err := e.o.Push.PutIcon(ctx, icon.Name, icon.Type, icon.Data); err != nil {
+			e.o.Log.WarnContext(ctx, "orrery icon put failed; the service is written without an icon", "repo", r.FullName, "icon", icon.Name, "error", err)
+			continue
+		}
+		_ = e.o.Store.PutWritten(ctx, "icon", icon.Name, icon.SHA256)
+		e.o.Log.InfoContext(ctx, "orrery icon put", "repo", r.FullName, "service", d.Service, "icon", icon.Name, "bytes", len(icon.Data))
+		held[icon.Name] = icon.Name
 	}
-	if had, _ := e.o.Store.Written(ctx, "icon", icon.Name); had == icon.SHA256 {
-		return icon.Name
-	}
-	if err := e.o.Push.PutIcon(ctx, icon.Name, icon.Type, icon.Data); err != nil {
-		e.o.Log.WarnContext(ctx, "orrery icon put failed; the service is written without an icon", "repo", r.FullName, "icon", icon.Name, "error", err)
-		return ""
-	}
-	_ = e.o.Store.PutWritten(ctx, "icon", icon.Name, icon.SHA256)
-	e.o.Log.InfoContext(ctx, "orrery icon put", "repo", r.FullName, "service", found.Described.Service, "icon", icon.Name, "bytes", len(icon.Data))
-	return icon.Name
+	return held
 }
 
 // place writes a described service's place in the estate's own scheme as a
 // patch of its own, when it changed since the last write. The names in it
 // are the estate's, so a hub without one refuses this patch alone, and the
 // service stands without its place.
-func (e *Engine) place(ctx context.Context, r *provider.Repo, p *sdk.Entity) {
-	if p == nil {
-		return
-	}
+func (e *Engine) place(ctx context.Context, r *provider.Repo, p sdk.Entity) {
 	b, _ := json.Marshal(p)
 	sum := sha256.Sum256(b)
 	h := hex.EncodeToString(sum[:])
 	if had, err := e.o.Store.Written(ctx, "placement", p.Key); err == nil && had == h {
 		return
 	}
-	if err := e.o.Push.Patch(ctx, *p); err != nil {
+	if err := e.o.Push.Patch(ctx, p); err != nil {
 		e.o.Log.WarnContext(ctx, "orrery refused a service's place; it stands without it", "repo", r.FullName, "service", p.Key, "error", err)
 		return
 	}
@@ -226,7 +229,9 @@ func (e *Engine) pushRepo(ctx context.Context, key string) {
 	}
 	if allowed(catalog.Service) {
 		e.run(ctx, sdk.Incremental, scope+"/services", catalog.Service, w.services)
-		e.place(ctx, t.repo, w.placement)
+		for _, p := range w.placements {
+			e.place(ctx, t.repo, p)
+		}
 	}
 	if allowed(catalog.API) {
 		e.run(ctx, sdk.Incremental, scope+"/apis", catalog.API, w.apis)
@@ -266,8 +271,8 @@ func (e *Engine) pushAccount(ctx context.Context, a provider.Account, keys []str
 		pipelines = append(pipelines, w.pipelines...)
 		svcs = append(svcs, w.services...)
 		apis = append(apis, w.apis...)
-		if w.placement != nil {
-			placed = append(placed, placement{repo: e.get(k).repo, entity: w.placement})
+		for _, p := range w.placements {
+			placed = append(placed, placement{repo: e.get(k).repo, entity: p})
 		}
 		issues = append(issues, w.issues...)
 	}
@@ -304,7 +309,7 @@ func (e *Engine) pushAccount(ctx context.Context, a provider.Account, keys []str
 // placement is one described service's place, with the repository it came from.
 type placement struct {
 	repo   *provider.Repo
-	entity *sdk.Entity
+	entity sdk.Entity
 }
 
 // changed says whether an entity differs from what was last written for it.

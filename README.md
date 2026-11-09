@@ -24,12 +24,14 @@ that can be rebuilt by one sweep.
 
 ### What a repository says about itself
 
-A repository describes the service it builds in `orrery.yaml` at its root:
-its key, its logo, the APIs it provides and calls, and, for one estate, its
-place in that estate's scheme. redgreen reads the file with the services, at
-the same commit, so an estate lists exactly the services of the repositories
-it reads, and nothing it does not. The key must be the repository's own, or
-a folder in it. The place (`fields` and `relations`) is the estate's own
+A repository describes the service it builds in an `orrery.yaml`: at its
+root, or beside the service in a repository that builds several. It holds
+the service's key, its logo, the APIs it provides and calls, and, for one
+estate, its place in that estate's scheme; paths in it are from the
+repository root. redgreen reads the files with the services, at the same
+commit, so an estate lists exactly the services of the repositories it
+reads, and nothing it does not. The key must be the repository's own, or a
+folder in it; a file in a folder names a service at or under that folder. The place (`fields` and `relations`) is the estate's own
 words: it goes as a patch of its own, so a hub that lacks one of them keeps
 the service without its place. A file that cannot be used is logged and left
 out; the services still stand.

@@ -41,10 +41,10 @@ var (
 )
 
 // ParseDescriptor reads an orrery.yaml and refuses one the hub would refuse.
-// repoKey is the key of the repository it was read from: the service it names
-// must be that repository or a folder in it, so no repository describes
-// another's service.
-func ParseDescriptor(text []byte, repoKey string) (*Descriptor, error) {
+// scope is the key of the repository it was read from, with the folder it
+// sits in: the service it names must be that key or under it, so no file
+// describes a service of another repository or another folder.
+func ParseDescriptor(text []byte, scope string) (*Descriptor, error) {
 	var d Descriptor
 	dec := yaml.NewDecoder(bytes.NewReader(text))
 	dec.KnownFields(true)
@@ -55,8 +55,8 @@ func ParseDescriptor(text []byte, repoKey string) (*Descriptor, error) {
 	if d.Service == "" {
 		return nil, errors.New("orrery.yaml: service is required")
 	}
-	if d.Service != repoKey && !strings.HasPrefix(d.Service, repoKey+"/") {
-		return nil, fmt.Errorf("orrery.yaml: service %q is not %q or a folder in it", d.Service, repoKey)
+	if d.Service != scope && !strings.HasPrefix(d.Service, scope+"/") {
+		return nil, fmt.Errorf("orrery.yaml: service %q is not %q or a folder in it", d.Service, scope)
 	}
 	if d.Icon != nil {
 		if !IconName.MatchString(d.Icon.Name) || d.Icon.File == "" {

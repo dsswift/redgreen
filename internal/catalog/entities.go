@@ -127,15 +127,15 @@ var languageIcons = map[string]string{
 	"HTML": "html", "CSS": "css", "SQL": "database",
 }
 
-// ServiceEntities are the services found in a repository. The one its
-// orrery.yaml describes wears the logo it names (icon, once the hub holds it;
-// empty keeps the hub's) and the APIs it calls, and is written even where no
-// build file was found for it. The rest wear their language.
-func ServiceEntities(r *provider.Repo, found *services.Found, icon string) []sdk.Entity {
+// ServiceEntities are the services found in a repository. One an
+// orrery.yaml describes wears the logo it names (icons maps a logo's name to
+// itself once the hub holds it; a name missing keeps the hub's) and the APIs
+// it calls, and is written even where no build file was found for it. The
+// rest wear their language.
+func ServiceEntities(r *provider.Repo, found *services.Found, icons map[string]string) []sdk.Entity {
 	repo := RepoKey(r.Provider, r.FullName)
-	d := found.Described
 	var out []sdk.Entity
-	described := false
+	described := map[string]bool{}
 	for _, s := range found.Services {
 		key := ServiceKey(repo, s.ID)
 		e := sdk.Entity{Blueprint: Service, Key: key, Title: s.Name, Icon: languageIcons[s.Language], Relations: map[string]any{"repository": repo}, Fields: map[string]any{
@@ -144,15 +144,19 @@ func ServiceEntities(r *provider.Repo, found *services.Found, icon string) []sdk
 			"last_human_changed_at": orNil(s.HumanChangedAt), "last_human_changed_by": orNil(s.HumanChangedBy), "last_human_changed_by_email": orNil(s.HumanChangedByEmail),
 			"has_readme": s.Files.Readme, "has_dockerfile": s.Files.Dockerfile, "has_tests": s.Files.Tests,
 		}}
-		if d != nil && d.Service == key {
-			describe(&e, d, icon)
-			described = true
+		if d := found.Describing(key); d != nil {
+			describe(&e, d, icons)
+			described[key] = true
 		}
 		out = append(out, e)
 	}
-	if d != nil && !described {
+	for i := range found.Descriptions {
+		d := &found.Descriptions[i]
+		if described[d.Service] {
+			continue
+		}
 		e := sdk.Entity{Blueprint: Service, Key: d.Service, Title: d.Service[strings.LastIndex(d.Service, "/")+1:], Relations: map[string]any{"repository": repo}, Fields: map[string]any{"origin": "built"}}
-		describe(&e, d, icon)
+		describe(&e, d, icons)
 		out = append(out, e)
 	}
 	return out
@@ -161,41 +165,39 @@ func ServiceEntities(r *provider.Repo, found *services.Found, icon string) []sdk
 // describe puts what an orrery.yaml says on its service: its logo and the
 // APIs it calls. An empty list is written as one, so a connector removed
 // from the file leaves the catalog.
-func describe(e *sdk.Entity, d *services.Descriptor, icon string) {
-	if icon != "" {
-		e.Icon = icon
-	} else if d.Icon != nil {
-		e.Icon = ""
+func describe(e *sdk.Entity, d *services.Description, icons map[string]string) {
+	if d.Icon != nil {
+		e.Icon = icons[d.Icon.Name]
 	}
 	e.Relations["consumes"] = nonNil(d.Consumes)
 	e.Relations["will_consume"] = nonNil(d.WillConsume)
 }
 
-// APIEntities are the APIs a repository's orrery.yaml says its service offers.
+// APIEntities are the APIs a repository's orrery.yaml files say their services offer.
 func APIEntities(r *provider.Repo, found *services.Found) []sdk.Entity {
-	d := found.Described
-	if d == nil {
-		return nil
-	}
 	var out []sdk.Entity
-	for _, a := range d.Provides {
-		out = append(out, sdk.Entity{Blueprint: API, Key: d.Service + "/" + strings.ToLower(a.ID), Title: a.Title,
-			Fields: map[string]any{"kind": a.Kind, "description": orNil(a.Description), "visibility": "internal", "external": false,
-				"spec": services.SpecURL(a.Spec, r.URL, string(r.Provider))},
-			Relations: map[string]any{"service": d.Service}})
+	for _, d := range found.Descriptions {
+		for _, a := range d.Provides {
+			out = append(out, sdk.Entity{Blueprint: API, Key: d.Service + "/" + strings.ToLower(a.ID), Title: a.Title,
+				Fields: map[string]any{"kind": a.Kind, "description": orNil(a.Description), "visibility": "internal", "external": false,
+					"spec": services.SpecURL(a.Spec, r.URL, string(r.Provider))},
+				Relations: map[string]any{"service": d.Service}})
+		}
 	}
 	return out
 }
 
-// Placement is a described service's place in the estate's own scheme: the
-// fields and relations its orrery.yaml names, which redgreen does not define.
-// Nil when it names none.
-func Placement(found *services.Found) *sdk.Entity {
-	d := found.Described
-	if d == nil || len(d.Fields)+len(d.Relations) == 0 {
-		return nil
+// Placements are each described service's place in the estate's own
+// scheme: the fields and relations its orrery.yaml names, which redgreen
+// does not define. A file that names none places nothing.
+func Placements(found *services.Found) []sdk.Entity {
+	var out []sdk.Entity
+	for _, d := range found.Descriptions {
+		if len(d.Fields)+len(d.Relations) > 0 {
+			out = append(out, sdk.Entity{Blueprint: Service, Key: d.Service, Fields: d.Fields, Relations: d.Relations})
+		}
 	}
-	return &sdk.Entity{Blueprint: Service, Key: d.Service, Fields: d.Fields, Relations: d.Relations}
+	return out
 }
 
 // DeploymentService is the service a repository-wide deployment rolled out:

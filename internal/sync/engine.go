@@ -328,10 +328,11 @@ func (e *Engine) services(ctx context.Context, p provider.Provider, t *tracked, 
 	if out.Read > services.ReadBudget {
 		e.o.Log.WarnContext(ctx, "read budget spent; services found so far stand", "repo", repo.FullName, "budget", services.ReadBudget)
 	}
-	if found.Problem != "" {
-		e.o.Log.WarnContext(ctx, "repo's orrery.yaml cannot be used in full; what it could not say is left out", "repo", repo.FullName, "problem", found.Problem)
-	} else if found.Described != nil {
-		e.o.Log.InfoContext(ctx, "repo describes a service", "repo", repo.FullName, "described", found.Described.Service, "apis", len(found.Described.Provides), "consumes", len(found.Described.Consumes))
+	for _, problem := range found.Problems {
+		e.o.Log.WarnContext(ctx, "an orrery.yaml cannot be used in full; what it could not say is left out", "repo", repo.FullName, "problem", problem)
+	}
+	for _, d := range found.Descriptions {
+		e.o.Log.InfoContext(ctx, "repo describes a service", "repo", repo.FullName, "file", d.File, "described", d.Service, "apis", len(d.Provides), "consumes", len(d.Consumes))
 	}
 	if err := e.o.Store.PutServices(ctx, key, found); err != nil {
 		e.o.Log.WarnContext(ctx, "services not kept", "repo", repo.FullName, "error", err)

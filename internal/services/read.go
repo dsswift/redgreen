@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"path"
 	"slices"
 	"strings"
 )
@@ -10,16 +11,33 @@ import (
 const DescriptorFile = "orrery.yaml"
 
 // Found is the services at one commit of the default branch, and what the
-// repository's orrery.yaml says about one of them.
+// repository's orrery.yaml files say about them.
 type Found struct {
 	// Commit is where they were read; "" for a repository with no commits.
-	Commit    string      `json:"commit"`
-	Rules     int         `json:"rules"`
-	Services  []Service   `json:"services"`
-	Described *Descriptor `json:"described,omitempty"`
-	Icon      *Icon       `json:"icon,omitempty"`
-	// Problem says why the orrery.yaml, or the logo it names, cannot be used.
-	Problem string `json:"problem,omitempty"`
+	Commit       string        `json:"commit"`
+	Rules        int           `json:"rules"`
+	Services     []Service     `json:"services"`
+	Descriptions []Description `json:"descriptions,omitempty"`
+	// Problems say why an orrery.yaml, or the logo it names, cannot be used.
+	Problems []string `json:"problems,omitempty"`
+}
+
+// Description is one orrery.yaml, with the logo it names when that could be read.
+type Description struct {
+	Descriptor
+	// File is where it was read, from the repository root.
+	File string `json:"file"`
+	Logo *Icon  `json:"logo,omitempty"`
+}
+
+// Describing is the description of the service at key, or nil.
+func (f *Found) Describing(key string) *Description {
+	for i := range f.Descriptions {
+		if f.Descriptions[i].Service == key {
+			return &f.Descriptions[i]
+		}
+	}
+	return nil
 }
 
 // Outcome says how a read went.
@@ -46,13 +64,12 @@ func Read(ctx context.Context, files Files, repoKey, repoName string, previous *
 	}
 	reader := &budgeted{ctx: ctx, files: files, budget: ReadBudget}
 	out := &Found{Commit: files.Commit(), Rules: Rules}
-	out.Described, out.Icon, out.Problem, err = readDescriptor(ctx, files, paths, repoKey)
-	if err != nil {
-		return nil, Outcome{}, err
-	}
 	out.Services = Detect(paths, reader.read, repoName)
 	if reader.err != nil {
 		return nil, Outcome{}, reader.err
+	}
+	if err := out.describe(ctx, files, paths, repoKey); err != nil {
+		return nil, Outcome{}, err
 	}
 	for i, s := range out.Services {
 		commits, err := files.Commits(ctx, s.Path)
@@ -98,40 +115,79 @@ func (b *budgeted) read(path string) (string, bool) {
 	return string(data), true
 }
 
-// readDescriptor reads the root orrery.yaml and the logo it names, at the
-// same commit as the services. A file that cannot be used is a problem, not
-// an error: the services still stand, described by their files alone. A logo
-// that cannot be used costs only the logo.
-func readDescriptor(ctx context.Context, files Files, paths []string, repoKey string) (*Descriptor, *Icon, string, error) {
-	if !slices.Contains(paths, DescriptorFile) {
-		return nil, nil, "", nil
+// describe reads the orrery.yaml at the root and the one beside each
+// service. The root one names a service of this repository; one in a folder
+// names a service at or under that folder. Paths in a file are
+// from the repository root. A file that cannot be used, or a second one for
+// the same service, is a problem, not an error: the services still stand,
+// described by their files alone. A logo that cannot be used costs only the
+// logo.
+func (f *Found) describe(ctx context.Context, files Files, paths []string, repoKey string) error {
+	where := []string{DescriptorFile}
+	for _, s := range f.Services {
+		if s.Path != "" {
+			where = append(where, s.Path+"/"+DescriptorFile)
+		}
 	}
-	text, err := files.Read(ctx, DescriptorFile)
+	slices.Sort(where[1:])
+	where = slices.Compact(where)
+	for _, file := range where {
+		if !slices.Contains(paths, file) {
+			continue
+		}
+		scope := repoKey
+		if dir := path.Dir(file); dir != "." {
+			scope += "/" + strings.ToLower(dir)
+		}
+		d, problem, err := readDescription(ctx, files, paths, file, scope)
+		if err != nil {
+			return err
+		}
+		if problem != "" {
+			f.Problems = append(f.Problems, file+": "+problem)
+		}
+		if d == nil {
+			continue
+		}
+		if f.Describing(d.Service) != nil {
+			f.Problems = append(f.Problems, file+": service "+d.Service+" is described twice; the first file stands")
+			continue
+		}
+		f.Descriptions = append(f.Descriptions, *d)
+	}
+	return nil
+}
+
+// readDescription reads one orrery.yaml, whose service is scope or under it, and the logo it names.
+func readDescription(ctx context.Context, files Files, paths []string, file, scope string) (*Description, string, error) {
+	text, err := files.Read(ctx, file)
 	if err != nil || text == nil {
-		return nil, nil, "", err
+		return nil, "", err
 	}
-	d, err := ParseDescriptor(text, repoKey)
+	d, err := ParseDescriptor(text, scope)
 	if err != nil {
-		return nil, nil, err.Error(), nil
+		return nil, err.Error(), nil
 	}
+	out := &Description{Descriptor: *d, File: file}
 	if d.Icon == nil {
-		return d, nil, "", nil
+		return out, "", nil
 	}
-	file := strings.TrimPrefix(strings.TrimPrefix(d.Icon.File, "./"), "/")
+	logo := strings.TrimPrefix(strings.TrimPrefix(d.Icon.File, "./"), "/")
 	missing := `icon file "` + d.Icon.File + `" is not in the repository`
-	if !slices.Contains(paths, file) {
-		return d, nil, missing, nil
+	if !slices.Contains(paths, logo) {
+		return out, missing, nil
 	}
-	data, err := files.Read(ctx, file)
+	data, err := files.Read(ctx, logo)
 	if err != nil {
-		return nil, nil, "", err
+		return nil, "", err
 	}
 	if data == nil {
-		return d, nil, missing, nil
+		return out, missing, nil
 	}
 	icon, err := CheckIcon(*d.Icon, data)
 	if err != nil {
-		return d, nil, err.Error(), nil
+		return out, err.Error(), nil
 	}
-	return d, icon, "", nil
+	out.Logo = icon
+	return out, "", nil
 }
