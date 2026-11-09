@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -149,5 +150,48 @@ func TestMeasuresUseTheKeptHistory(t *testing.T) {
 	h := Judge(pipe(), "main", history, Release{}, now)
 	if h.Runs30d != 29 || *h.SuccessRate != 100 || h.TrendMonth != "improving" || *h.DurationP50 != 120 || h.Trend == nil {
 		t.Errorf("runs %d rate %v trend %s p50 %v", h.Runs30d, *h.SuccessRate, h.TrendMonth, *h.DurationP50)
+	}
+}
+
+// TestMeasuresHoldStillBetweenSweeps checks that a sweep ten minutes after
+// another, with the same runs, writes the same measures: a run ageing past a
+// window's edge in between must not move them.
+func TestMeasuresHoldStillBetweenSweeps(t *testing.T) {
+	history := []provider.Run{
+		run("2026-09-29T09:00:00Z", nil),
+		run("2026-09-28T00:05:00Z", fails),
+		run("2026-09-27T23:55:00Z", nil),
+		run("2026-09-14T08:00:00Z", fails),
+		run(now.Add(-30*24*time.Hour+5*time.Minute).Format(time.RFC3339), fails),
+		run(now.Add(-60*24*time.Hour+5*time.Minute).Format(time.RFC3339), nil),
+		run("2026-08-03T08:00:00Z", nil),
+	}
+	first := Judge(pipe(), "main", history, Release{}, now)
+	second := Judge(pipe(), "main", history, Release{}, now.Add(10*time.Minute))
+	if !reflect.DeepEqual(first.Trend, second.Trend) {
+		t.Errorf("success_trend moved between sweeps:\n%v\n%v", first.Trend, second.Trend)
+	}
+	if first.Runs30d != second.Runs30d || *first.SuccessRate != *second.SuccessRate || first.TrendMonth != second.TrendMonth || *first.DurationP50 != *second.DurationP50 {
+		t.Errorf("30-day measures moved between sweeps: %d/%d runs, %v/%v rate, %s/%s trend", first.Runs30d, second.Runs30d, *first.SuccessRate, *second.SuccessRate, first.TrendMonth, second.TrendMonth)
+	}
+}
+
+// TestSuccessTrendBucketsByCalendarWeek checks each point is a week from
+// Monday 00:00 UTC, the current week its own bucket, and sits at its start.
+func TestSuccessTrendBucketsByCalendarWeek(t *testing.T) {
+	history := []provider.Run{
+		run("2026-09-29T09:00:00Z", nil),
+		run("2026-09-28T00:05:00Z", fails),
+		run("2026-09-27T23:55:00Z", nil),
+		run("2026-09-21T00:00:00Z", fails),
+	}
+	h := Judge(pipe(), "main", history, Release{}, now)
+	points := h.Trend["points"].([]map[string]any)
+	want := []map[string]any{{"at": "2026-09-21T00:00:00Z", "value": 50.0}, {"at": "2026-09-28T00:00:00Z", "value": 50.0}}
+	if !reflect.DeepEqual(points, want) {
+		t.Errorf("points %v, want %v", points, want)
+	}
+	if h.Trend["from"] != "2026-08-03T00:00:00Z" || h.Trend["to"] != "2026-09-28T00:00:00Z" {
+		t.Errorf("axis %v to %v", h.Trend["from"], h.Trend["to"])
 	}
 }

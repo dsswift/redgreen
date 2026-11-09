@@ -259,18 +259,19 @@ const trendPoints = 10
 
 // measures counts the finished default-branch runs of the last 30 days, their
 // success rate, the median duration of the successful ones, the trend against
-// the 30 days before, and the weekly success rate over 60 days.
+// the 30 days before, and the success rate of each of the last nine calendar
+// weeks. Every window ends on a day or week boundary, so a sweep moves a
+// measure only when a run lands or a day rolls, never because ten minutes
+// passed.
 func measures(runs []provider.Run, branch string, now time.Time) (int, *float64, *float64, string, map[string]any) {
-	day := 24 * time.Hour
 	type tally struct {
 		runs, ok  int
 		durations []float64
 	}
-	window := func(from, to time.Duration) tally {
+	window := func(from, to time.Time) tally {
 		var t tally
 		for _, r := range runs {
-			age := now.Sub(r.CreatedAt)
-			if r.Ref != branch || r.Trigger == provider.TriggerPR || r.Status != provider.StatusCompleted || age < from || age >= to {
+			if r.Ref != branch || r.Trigger == provider.TriggerPR || r.Status != provider.StatusCompleted || r.CreatedAt.Before(from) || !r.CreatedAt.Before(to) {
 				continue
 			}
 			t.runs++
@@ -284,7 +285,8 @@ func measures(runs []provider.Run, branch string, now time.Time) (int, *float64,
 		return t
 	}
 	pct := func(t tally) float64 { return math.Round(float64(t.ok) / float64(t.runs) * 100) }
-	month, prev := window(0, 30*day), window(30*day, 60*day)
+	dayEnd := dayStart(now).AddDate(0, 0, 1)
+	month, prev := window(dayEnd.AddDate(0, 0, -30), dayEnd), window(dayEnd.AddDate(0, 0, -60), dayEnd.AddDate(0, 0, -30))
 	var rate, p50 *float64
 	if month.runs > 0 {
 		r := pct(month)
@@ -305,19 +307,39 @@ func measures(runs []provider.Run, branch string, now time.Time) (int, *float64,
 			trend = "steady"
 		}
 	}
+	// The current week is its own bucket, however far it has run, and each
+	// point sits at its week's start.
+	week := weekStart(now)
 	var points []map[string]any
-	for w := 8; w >= 0; w-- {
-		t := window(time.Duration(w)*7*day, time.Duration(w+1)*7*day)
+	for w := trendWeeks - 1; w >= 0; w-- {
+		start := week.AddDate(0, 0, -7*w)
+		t := window(start, start.AddDate(0, 0, 7))
 		if t.runs == 0 {
 			continue
 		}
-		points = append(points, map[string]any{"at": now.Add(-time.Duration(w) * 7 * day).UTC().Format(time.RFC3339), "value": pct(t)})
+		points = append(points, map[string]any{"at": start.Format(time.RFC3339), "value": pct(t)})
 	}
 	var series map[string]any
 	if len(points) > 0 {
-		series = map[string]any{"points": points, "min": 0, "max": 100, "unit": "%", "from": now.Add(-60 * day).UTC().Format(time.RFC3339), "to": now.UTC().Format(time.RFC3339)}
+		series = map[string]any{"points": points, "min": 0, "max": 100, "unit": "%", "from": week.AddDate(0, 0, -7*(trendWeeks-1)).Format(time.RFC3339), "to": week.Format(time.RFC3339)}
 	}
 	return month.runs, rate, p50, trend, series
+}
+
+// trendWeeks is how many calendar weeks the success trend holds, the current
+// one included.
+const trendWeeks = 9
+
+// dayStart is 00:00 UTC on the day of t.
+func dayStart(t time.Time) time.Time {
+	y, m, d := t.UTC().Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+}
+
+// weekStart is 00:00 UTC on the Monday of t's week.
+func weekStart(t time.Time) time.Time {
+	d := dayStart(t)
+	return d.AddDate(0, 0, -((int(d.Weekday()) + 6) % 7))
 }
 
 func median(xs []float64) float64 {
