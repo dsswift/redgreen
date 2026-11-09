@@ -55,6 +55,12 @@ All notable changes to this project will be documented in this file. See [standa
 * one language list and open fields ([dafe517](https://github.com/dsswift/redgreen/commit/dafe5174f0f73ab5ec834e686569882f91c35749))
 * push forge deployments to orrery ([185abff](https://github.com/dsswift/redgreen/commit/185abff406076d4b4a343b502ade925caf96625e))
 
+## [1.3.1](https://github.com/dsswift/redgreen/compare/v1.3.0...v1.3.1) (2026-11-09)
+
+### Bug Fixes
+
+* anchor delivery measures to days and weeks ([401d9bf](https://github.com/dsswift/redgreen/commit/401d9bf882c5eaa39e1f8360a988c9b40efc1d20))
+
 ## [1.3.0](https://github.com/dsswift/redgreen/compare/v1.2.0...v1.3.0) (2026-11-08)
 
 ### Features
