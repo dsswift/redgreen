@@ -50,7 +50,6 @@ type Telemetry struct {
 	webhookLag   metric.Float64Histogram
 	webhooks     metric.Int64Counter
 	pushes       metric.Int64Counter
-	describes    metric.Int64Counter
 	requests     metric.Float64Histogram
 	jobs         metric.Int64Counter
 	jobWait      metric.Float64Histogram
@@ -102,8 +101,6 @@ func Setup(ctx context.Context, endpoint, service, version string, log *slog.Log
 	t.webhooks, err = m.Int64Counter(Service+".webhooks", metric.WithDescription("Webhook deliveries, by provider and outcome."))
 	keep(err)
 	t.pushes, err = m.Int64Counter(Service+".push.entities", metric.WithDescription("Entities written to Orrery, by blueprint and outcome."))
-	keep(err)
-	t.describes, err = m.Int64Counter(Service+".orrery.describe", metric.WithDescription("Writes of the app's own description to Orrery, by outcome."))
 	keep(err)
 	// A job waits seconds for a runner on a good day and an hour on a bad
 	// one, and runs from seconds to hours.
@@ -245,11 +242,6 @@ func (t *Telemetry) Pushed(ctx context.Context, blueprint, outcome string, n int
 		return
 	}
 	t.pushes.Add(ctx, int64(n), metric.WithAttributes(attribute.String("blueprint", blueprint), attribute.String("outcome", outcome)))
-}
-
-// Described counts one write of redgreen's own description.
-func (t *Telemetry) Described(ctx context.Context, outcome string) {
-	t.describes.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", outcome)))
 }
 
 // Start opens a span; a background task is a root span of its own.

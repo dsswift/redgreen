@@ -3,13 +3,10 @@ package services
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"path"
 	"regexp"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
 // IconName is a custom icon name the hub takes.
@@ -32,8 +29,6 @@ type Icon struct {
 	Type   string `json:"type"`
 	SHA256 string `json:"sha256"`
 	Data   []byte `json:"data"`
-	// Service is the sw_service key the descriptor names, lowercase. Empty for redgreen's own.
-	Service string `json:"service,omitempty"`
 }
 
 // IconType is the type a file is sent as, from its extension, or "".
@@ -62,32 +57,4 @@ func CheckIcon(ref IconRef, data []byte) (*Icon, error) {
 	}
 	sum := sha256.Sum256(data)
 	return &Icon{Name: ref.Name, Type: t, SHA256: hex.EncodeToString(sum[:]), Data: data}, nil
-}
-
-// DescribedIcon reads the service and logo another repository's orrery.yaml
-// names. Only service and icon are read. Nil when it names no logo; an error
-// when it names one the wrong way.
-func DescribedIcon(text string) (service string, ref *IconRef, err error) {
-	var doc map[string]any
-	if err := yaml.Unmarshal([]byte(text), &doc); err != nil {
-		return "", nil, err
-	}
-	raw, ok := doc["icon"]
-	if !ok || raw == nil {
-		return "", nil, nil
-	}
-	service, _ = doc["service"].(string)
-	if service == "" {
-		return "", nil, errors.New("orrery.yaml names an icon but no service")
-	}
-	m, ok := raw.(map[string]any)
-	if !ok {
-		return "", nil, errors.New("orrery.yaml: icon needs a name and a file")
-	}
-	name, _ := m["name"].(string)
-	file, _ := m["file"].(string)
-	if name == "" || file == "" {
-		return "", nil, errors.New("orrery.yaml: icon needs a name and a file")
-	}
-	return service, &IconRef{Name: name, File: file}, nil
 }

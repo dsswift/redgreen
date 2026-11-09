@@ -127,33 +127,75 @@ var languageIcons = map[string]string{
 	"HTML": "html", "CSS": "css", "SQL": "database",
 }
 
-// Logo is the logo a repository's orrery.yaml names for one of its services.
-// Icon is its name once the hub holds it, empty when the put failed: that
-// service is written without an icon, so the hub keeps the one it has.
-type Logo struct {
-	Service string
-	Icon    string
-}
-
-// ServiceEntities are the services found in a repository. A service the
-// repository's logo names wears it instead of its language.
-func ServiceEntities(r *provider.Repo, found *services.Found, logo *Logo) []sdk.Entity {
+// ServiceEntities are the services found in a repository. The one its
+// orrery.yaml describes wears the logo it names (icon, once the hub holds it;
+// empty keeps the hub's) and the APIs it calls, and is written even where no
+// build file was found for it. The rest wear their language.
+func ServiceEntities(r *provider.Repo, found *services.Found, icon string) []sdk.Entity {
 	repo := RepoKey(r.Provider, r.FullName)
+	d := found.Described
 	var out []sdk.Entity
+	described := false
 	for _, s := range found.Services {
 		key := ServiceKey(repo, s.ID)
-		icon := languageIcons[s.Language]
-		if logo != nil && strings.EqualFold(logo.Service, key) {
-			icon = logo.Icon
-		}
-		out = append(out, sdk.Entity{Blueprint: Service, Key: key, Title: s.Name, Icon: icon, Relations: map[string]any{"repository": repo}, Fields: map[string]any{
-			"path": s.Path, "type": s.Type, "language": orNil(s.Language),
+		e := sdk.Entity{Blueprint: Service, Key: key, Title: s.Name, Icon: languageIcons[s.Language], Relations: map[string]any{"repository": repo}, Fields: map[string]any{
+			"origin": "built", "path": s.Path, "type": s.Type, "language": orNil(s.Language),
 			"last_changed_at": orNil(s.ChangedAt), "last_changed_by": orNil(s.ChangedBy), "last_changed_by_email": orNil(s.ChangedByEmail),
 			"last_human_changed_at": orNil(s.HumanChangedAt), "last_human_changed_by": orNil(s.HumanChangedBy), "last_human_changed_by_email": orNil(s.HumanChangedByEmail),
 			"has_readme": s.Files.Readme, "has_dockerfile": s.Files.Dockerfile, "has_tests": s.Files.Tests,
-		}})
+		}}
+		if d != nil && d.Service == key {
+			describe(&e, d, icon)
+			described = true
+		}
+		out = append(out, e)
+	}
+	if d != nil && !described {
+		e := sdk.Entity{Blueprint: Service, Key: d.Service, Title: d.Service[strings.LastIndex(d.Service, "/")+1:], Relations: map[string]any{"repository": repo}, Fields: map[string]any{"origin": "built"}}
+		describe(&e, d, icon)
+		out = append(out, e)
 	}
 	return out
+}
+
+// describe puts what an orrery.yaml says on its service: its logo and the
+// APIs it calls. An empty list is written as one, so a connector removed
+// from the file leaves the catalog.
+func describe(e *sdk.Entity, d *services.Descriptor, icon string) {
+	if icon != "" {
+		e.Icon = icon
+	} else if d.Icon != nil {
+		e.Icon = ""
+	}
+	e.Relations["consumes"] = nonNil(d.Consumes)
+	e.Relations["will_consume"] = nonNil(d.WillConsume)
+}
+
+// APIEntities are the APIs a repository's orrery.yaml says its service offers.
+func APIEntities(r *provider.Repo, found *services.Found) []sdk.Entity {
+	d := found.Described
+	if d == nil {
+		return nil
+	}
+	var out []sdk.Entity
+	for _, a := range d.Provides {
+		out = append(out, sdk.Entity{Blueprint: API, Key: d.Service + "/" + strings.ToLower(a.ID), Title: a.Title,
+			Fields: map[string]any{"kind": a.Kind, "description": orNil(a.Description), "visibility": "internal", "external": false,
+				"spec": services.SpecURL(a.Spec, r.URL, string(r.Provider))},
+			Relations: map[string]any{"service": d.Service}})
+	}
+	return out
+}
+
+// Placement is a described service's place in the estate's own scheme: the
+// fields and relations its orrery.yaml names, which redgreen does not define.
+// Nil when it names none.
+func Placement(found *services.Found) *sdk.Entity {
+	d := found.Described
+	if d == nil || len(d.Fields)+len(d.Relations) == 0 {
+		return nil
+	}
+	return &sdk.Entity{Blueprint: Service, Key: d.Service, Fields: d.Fields, Relations: d.Relations}
 }
 
 // DeploymentService is the service a repository-wide deployment rolled out:

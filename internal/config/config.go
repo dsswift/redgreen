@@ -24,7 +24,6 @@ type Config struct {
 
 	OrreryURL       string
 	OrreryToken     string
-	OrreryPushToken string
 	OrreryReadToken string
 
 	OtelEndpoint string
@@ -106,7 +105,6 @@ func Parse(get func(string) string) (Config, error) {
 
 		OrreryURL:       link("ORRERY_URL", ""),
 		OrreryToken:     str("ORRERY_TOKEN", ""),
-		OrreryPushToken: str("ORRERY_PUSH_TOKEN", ""),
 		OrreryReadToken: str("ORRERY_READ_TOKEN", ""),
 
 		OtelEndpoint: link("OTEL_EXPORTER_OTLP_ENDPOINT", ""),

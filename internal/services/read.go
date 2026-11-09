@@ -9,16 +9,17 @@ import (
 // DescriptorFile is where a repository describes itself.
 const DescriptorFile = "orrery.yaml"
 
-// Found is the services at one commit of the default branch, and the logo
-// the repository's orrery.yaml names.
+// Found is the services at one commit of the default branch, and what the
+// repository's orrery.yaml says about one of them.
 type Found struct {
 	// Commit is where they were read; "" for a repository with no commits.
-	Commit   string    `json:"commit"`
-	Rules    int       `json:"rules"`
-	Services []Service `json:"services"`
-	Icon     *Icon     `json:"icon,omitempty"`
-	// IconProblem says why a named logo cannot be used.
-	IconProblem string `json:"iconProblem,omitempty"`
+	Commit    string      `json:"commit"`
+	Rules     int         `json:"rules"`
+	Services  []Service   `json:"services"`
+	Described *Descriptor `json:"described,omitempty"`
+	Icon      *Icon       `json:"icon,omitempty"`
+	// Problem says why the orrery.yaml, or the logo it names, cannot be used.
+	Problem string `json:"problem,omitempty"`
 }
 
 // Outcome says how a read went.
@@ -28,10 +29,11 @@ type Outcome struct {
 	Read int
 }
 
-// Read finds the services at the head of a repository's default branch.
-// The last answer stands while the branch has not moved and the rules have
-// not changed, so a quiet repository costs one look at its head.
-func Read(ctx context.Context, files Files, repoName string, previous *Found, bots Bots) (*Found, Outcome, error) {
+// Read finds the services at the head of a repository's default branch, and
+// reads its orrery.yaml. The last answer stands while the branch has not
+// moved and the rules have not changed, so a quiet repository costs one look
+// at its head.
+func Read(ctx context.Context, files Files, repoKey, repoName string, previous *Found, bots Bots) (*Found, Outcome, error) {
 	if files == nil {
 		return &Found{Rules: Rules}, Outcome{}, nil
 	}
@@ -44,7 +46,7 @@ func Read(ctx context.Context, files Files, repoName string, previous *Found, bo
 	}
 	reader := &budgeted{ctx: ctx, files: files, budget: ReadBudget}
 	out := &Found{Commit: files.Commit(), Rules: Rules}
-	out.Icon, out.IconProblem, err = readLogo(ctx, files, paths)
+	out.Described, out.Icon, out.Problem, err = readDescriptor(ctx, files, paths, repoKey)
 	if err != nil {
 		return nil, Outcome{}, err
 	}
@@ -96,39 +98,40 @@ func (b *budgeted) read(path string) (string, bool) {
 	return string(data), true
 }
 
-// readLogo reads the logo the root orrery.yaml names for its service, at the
-// same commit as the services. A logo named the wrong way is a problem, not
-// an error: the services still stand.
-func readLogo(ctx context.Context, files Files, paths []string) (*Icon, string, error) {
+// readDescriptor reads the root orrery.yaml and the logo it names, at the
+// same commit as the services. A file that cannot be used is a problem, not
+// an error: the services still stand, described by their files alone. A logo
+// that cannot be used costs only the logo.
+func readDescriptor(ctx context.Context, files Files, paths []string, repoKey string) (*Descriptor, *Icon, string, error) {
 	if !slices.Contains(paths, DescriptorFile) {
-		return nil, "", nil
+		return nil, nil, "", nil
 	}
 	text, err := files.Read(ctx, DescriptorFile)
 	if err != nil || text == nil {
-		return nil, "", err
+		return nil, nil, "", err
 	}
-	service, ref, err := DescribedIcon(string(text))
+	d, err := ParseDescriptor(text, repoKey)
 	if err != nil {
-		return nil, err.Error(), nil
+		return nil, nil, err.Error(), nil
 	}
-	if ref == nil {
-		return nil, "", nil
+	if d.Icon == nil {
+		return d, nil, "", nil
 	}
-	file := strings.TrimPrefix(strings.TrimPrefix(ref.File, "./"), "/")
+	file := strings.TrimPrefix(strings.TrimPrefix(d.Icon.File, "./"), "/")
+	missing := `icon file "` + d.Icon.File + `" is not in the repository`
 	if !slices.Contains(paths, file) {
-		return nil, `icon file "` + ref.File + `" is not in the repository`, nil
+		return d, nil, missing, nil
 	}
 	data, err := files.Read(ctx, file)
 	if err != nil {
-		return nil, "", err
+		return nil, nil, "", err
 	}
 	if data == nil {
-		return nil, `icon file "` + ref.File + `" is not in the repository`, nil
+		return d, nil, missing, nil
 	}
-	icon, err := CheckIcon(*ref, data)
+	icon, err := CheckIcon(*d.Icon, data)
 	if err != nil {
-		return nil, err.Error(), nil
+		return d, nil, err.Error(), nil
 	}
-	icon.Service = strings.ToLower(service)
-	return icon, "", nil
+	return d, icon, "", nil
 }

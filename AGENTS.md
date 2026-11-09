@@ -43,7 +43,10 @@ The forges' door into Orrery. Read `README.md` first.
   telemetry only: jobs waiting and running, wait and run times. Nothing in
   it reaches Orrery.
 - `internal/sync` is the engine: the sweep, the workers, webhooks, and the
-  writes. `internal/describe` writes redgreen's own `orrery.yaml`.
+  writes. `internal/services/descriptor.go` reads a repository's
+  `orrery.yaml`; it is the only reader of one. An app never writes its own
+  description: redgreen reads its own file from its repository like any
+  other.
   `internal/telemetry` is logs, traces, and metrics.
 
 ## Rules of the house

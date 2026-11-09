@@ -125,13 +125,15 @@ func TestEntitiesWriteOnlyDefinedFields(t *testing.T) {
 	repo := &provider.Repo{Provider: provider.GitHub, FullName: "acme/api", Name: "api", Facts: &provider.Facts{}, Dependabot: &provider.Alerts{},
 		Releases: []provider.Release{{Tag: "v1"}}, Issues: []provider.Issue{{Number: 1}}, PullRequests: []provider.PullRequest{{Number: 2}}}
 	p := provider.Pipeline{ID: "7", Name: "CI"}
-	found := &services.Found{Services: []services.Service{{ID: "", Name: "api", Language: "Go"}}}
+	found := &services.Found{Services: []services.Service{{ID: "", Name: "api", Language: "Go"}},
+		Described: &services.Descriptor{Service: "github/acme/api", Provides: []services.API{{ID: "v1", Title: "API", Kind: "rest", Spec: "openapi.yaml"}}, Consumes: []string{"github/acme/hub/catalog"}}}
 	entities := []sdk.Entity{
 		RepositoryEntity(repo, now),
 		PipelineEntity(repo, p, Judge(p, "main", nil, Release{}, now)),
 		DeploymentEntity("github/acme/api", "api", "github/acme/api", provider.Deployment{ID: "1", FinishedAt: &finished}, Outcome{}),
 	}
-	entities = append(entities, ServiceEntities(repo, found, nil)...)
+	entities = append(entities, ServiceEntities(repo, found, "")...)
+	entities = append(entities, APIEntities(repo, found)...)
 	entities = append(entities, IssueEntities(repo)...)
 	all := byID()
 	for _, e := range entities {

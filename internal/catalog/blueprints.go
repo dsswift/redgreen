@@ -96,6 +96,7 @@ const (
 	Repository = "sw_repository"
 	Pipeline   = "sw_pipeline"
 	Service    = "sw_service"
+	API        = "sw_api"
 	Deployment = "sw_deployment"
 	Issue      = "sw_issue"
 	Team       = "team"
@@ -299,8 +300,9 @@ func DORA(relation string) Fields {
 func ServiceBlueprint() sdk.Blueprint {
 	return sdk.Blueprint{
 		"id": Service, "title": "Service", "group": "Catalog", "icon": "azure_service_fabric_clusters", "formerly": []string{"service"},
-		"description": "One deployable piece of software, keyed by its repository path. redgreen finds each from the files that build it and writes where it lives, what it is, and what it is written in, with its DORA measures from its deployments.",
+		"description": "One deployable piece of software, keyed by its repository path. redgreen finds each from the files that build it and writes where it lives, what it is, and what it is written in, with its DORA measures from its deployments. A repository's orrery.yaml adds the APIs its service offers and calls.",
 		"fields": join(Fields{
+			f("origin", typed("enum", "values", []string{"built", "adopted"}, "chip", true, "description", "Built here, or open source the estate runs. Every service redgreen finds is built here.")),
 			f("path", typed("string", "description", "Where it sits in its repository, empty for one that is the whole repository.")),
 			f("type", typed("enum", "values", []string{"backend", "frontend", "library", "infrastructure", "tool", "docs", "other"}, "description", "What kind of thing it is, read from the files that build it.")),
 			f("language", typed("enum", "values", services.Languages, "sticky", true, "description", "What it is written in, read from the files that build it. A person who knows better changes it, and that change stays.")),
@@ -314,7 +316,27 @@ func ServiceBlueprint() sdk.Blueprint {
 			f("has_dockerfile", typed("boolean", "title", "Has Dockerfile", "description", "A Dockerfile that builds it.")),
 			f("has_tests", typed("boolean", "title", "Has tests", "description", "Automated tests that belong to it.")),
 		}, DORA("<-"+Deployment+":service")),
-		"relations": map[string]any{"repository": map[string]any{"target": Repository, "many": false, "title": "Homed in", "inverseTitle": "Services"}},
+		"relations": map[string]any{
+			"repository":   map[string]any{"target": Repository, "many": false, "title": "Homed in", "inverseTitle": "Services"},
+			"consumes":     map[string]any{"target": API, "many": true, "title": "Consumes", "inverseTitle": "Consumed by", "description": "The APIs it calls today, from its repository's orrery.yaml."},
+			"will_consume": map[string]any{"target": API, "many": true, "title": "Will consume", "inverseTitle": "Wanted by", "description": "The APIs it should call and does not yet, from its repository's orrery.yaml."},
+		},
+	}
+}
+
+// APIBlueprint is an interface a service offers, as its repository's orrery.yaml names it.
+func APIBlueprint() sdk.Blueprint {
+	return sdk.Blueprint{
+		"id": API, "title": "API", "group": "Catalog", "formerly": []string{"api"},
+		"description": "An interface a service offers others, keyed <service key>/<id>. redgreen writes each one a repository's orrery.yaml provides.",
+		"fields": Fields{
+			f("description", typed("string")),
+			f("kind", typed("enum", "values", services.APIKinds)),
+			f("visibility", typed("enum", "values", []string{"internal", "partner", "public"})),
+			f("external", typed("boolean")),
+			f("spec", typed("url", "title", "Definition", "description", "Where its machine-readable definition is read: a file in its repository, or the URL that serves it.")),
+		},
+		"relations": map[string]any{"service": map[string]any{"target": Service, "many": false, "title": "Provided by", "inverseTitle": "Provides"}},
 	}
 }
 
@@ -383,5 +405,5 @@ func IssueBlueprint() sdk.Blueprint {
 
 // Blueprints are offered in this order; the hub accepts relations in any order.
 func Blueprints() []sdk.Blueprint {
-	return []sdk.Blueprint{RepositoryBlueprint(), PipelineBlueprint(), ServiceBlueprint(), DeploymentBlueprint(), IssueBlueprint(), TeamDORA()}
+	return []sdk.Blueprint{RepositoryBlueprint(), PipelineBlueprint(), ServiceBlueprint(), APIBlueprint(), DeploymentBlueprint(), IssueBlueprint(), TeamDORA()}
 }

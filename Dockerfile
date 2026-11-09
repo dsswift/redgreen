@@ -20,7 +20,6 @@ RUN version=$(sed 's/ .*//' VERSION) \
 FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /app
 COPY --from=build /out/redgreen /app/redgreen
-COPY orrery.yaml logo.svg /app/
 COPY --from=build --chown=nonroot:nonroot /out/data /data
 ENV PORT=8080 DATA_DIR=/data
 VOLUME /data

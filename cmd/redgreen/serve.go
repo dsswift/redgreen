@@ -16,7 +16,6 @@ import (
 
 	"github.com/dsswift/orrery/sdk"
 	"github.com/dsswift/redgreen/internal/config"
-	"github.com/dsswift/redgreen/internal/describe"
 	"github.com/dsswift/redgreen/internal/outcomes"
 	"github.com/dsswift/redgreen/internal/provider"
 	"github.com/dsswift/redgreen/internal/provider/azuredevops"
@@ -88,16 +87,6 @@ func serve() error {
 	} else {
 		log.Info("orrery read off: ORRERY_URL and ORRERY_READ_TOKEN are not both set; Argo CD syncs and incidents are not read")
 	}
-	if c := hub(cfg.OrreryPushToken, "orrery-describe"); c != nil {
-		desc, err := describe.Load("orrery.yaml")
-		if err != nil {
-			return err
-		}
-		go describe.Describer{Client: c, Desc: desc, Tel: tel, Log: base.With("component", "orrery-describe")}.Run(ctx)
-	} else {
-		log.Info("orrery describe off: ORRERY_URL and ORRERY_PUSH_TOKEN are not both set")
-	}
-
 	gitlabHost := ""
 	if u, err := url.Parse(cfg.GitLabURL); err == nil {
 		gitlabHost = u.Hostname()

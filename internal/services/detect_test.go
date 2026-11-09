@@ -228,7 +228,7 @@ func TestReadStampsLastChange(t *testing.T) {
 	f := memFiles{commit: "a", files: map[string][]byte{"main.go": []byte("package main\nfunc main() {}\n")}, recent: []Commit{
 		{At: "3", By: "release-damnit"}, {At: "2", By: "dependabot[bot]"}, {At: "1", By: "a-developer", Email: " A.Developer@Example.com "},
 	}}
-	found, _, err := Read(context.Background(), f, "tool", nil, Bots{})
+	found, _, err := Read(context.Background(), f, "github/acme/tool", "tool", nil, Bots{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,25 +242,25 @@ func TestReadAgainOnlyWhenBranchOrRulesMoved(t *testing.T) {
 	files := func(commit string) memFiles {
 		return memFiles{commit: commit, files: map[string][]byte{"main.go": []byte("package main\nfunc main() {}\n")}, reads: &reads}
 	}
-	first, out, _ := Read(ctx, files("a"), "tool", nil, Bots{})
+	first, out, _ := Read(ctx, files("a"), "github/acme/tool", "tool", nil, Bots{})
 	if out.Reused || first.Commit != "a" || first.Rules != Rules || first.Services[0].Type != Tool || first.Services[0].Language != "Go" {
 		t.Fatalf("first read: %+v %+v", first, out)
 	}
-	if _, out, _ := Read(ctx, files("a"), "tool", first, Bots{}); !out.Reused {
+	if _, out, _ := Read(ctx, files("a"), "github/acme/tool", "tool", first, Bots{}); !out.Reused {
 		t.Fatal("same commit read again")
 	}
-	if _, out, _ := Read(ctx, files("b"), "tool", first, Bots{}); out.Reused {
+	if _, out, _ := Read(ctx, files("b"), "github/acme/tool", "tool", first, Bots{}); out.Reused {
 		t.Fatal("moved branch reused")
 	}
 	older := *first
 	older.Rules = Rules - 1
-	if _, out, _ := Read(ctx, files("a"), "tool", &older, Bots{}); out.Reused {
+	if _, out, _ := Read(ctx, files("a"), "github/acme/tool", "tool", &older, Bots{}); out.Reused {
 		t.Fatal("older rules reused")
 	}
 	if len(reads) != 3 {
 		t.Fatalf("reads = %d, want 3", len(reads))
 	}
-	empty, _, _ := Read(ctx, nil, "x", nil, Bots{})
+	empty, _, _ := Read(ctx, nil, "github/acme/x", "x", nil, Bots{})
 	same(t, *empty, Found{Rules: Rules})
 }
 
@@ -289,40 +289,59 @@ func TestBots(t *testing.T) {
 	same(t, Bots{}.Is(Commit{By: "Deploy Robot"}), false)
 }
 
-func TestReadLogo(t *testing.T) {
+func TestReadDescriptor(t *testing.T) {
 	ctx := context.Background()
 	svg := []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`)
-	logo := func(files map[string][]byte) (*Icon, string) {
+	read := func(files map[string][]byte) (*Descriptor, *Icon, string) {
 		m := memFiles{commit: "c", files: files}
 		paths, _ := m.List(ctx)
-		icon, problem, err := readLogo(ctx, m, paths)
+		d, icon, problem, err := readDescriptor(ctx, m, paths, "github/example/app")
 		if err != nil {
 			t.Fatal(err)
 		}
-		return icon, problem
+		return d, icon, problem
 	}
-	icon, _ := logo(map[string][]byte{"orrery.yaml": []byte("service: GitHub/Example/App\nicon: {name: app, file: ./brand/logo.svg}\nprovides: []\n"), "brand/logo.svg": svg})
-	if icon == nil || icon.Service != "github/example/app" || icon.Name != "app" || icon.Type != "image/svg+xml" || len(icon.SHA256) != 64 {
+	d, icon, _ := read(map[string][]byte{"orrery.yaml": []byte("service: GitHub/Example/App/cmd/app\nicon: {name: app, file: ./brand/logo.svg}\nprovides: [{id: v1, title: API, kind: rest, spec: api/openapi.yaml}]\nconsumes: [github/acme/hub/catalog]\nfields: {category: Portal}\n"), "brand/logo.svg": svg})
+	if d == nil || d.Service != "github/example/app/cmd/app" || len(d.Provides) != 1 || d.Consumes[0] != "github/acme/hub/catalog" || d.Fields["category"] != "Portal" {
+		t.Fatalf("descriptor = %+v", d)
+	}
+	if icon == nil || icon.Name != "app" || icon.Type != "image/svg+xml" || len(icon.SHA256) != 64 {
 		t.Fatalf("icon = %+v", icon)
 	}
-	if icon, problem := logo(map[string][]byte{"main.go": nil}); icon != nil || problem != "" {
-		t.Fatal("no orrery.yaml names no logo")
+	if d, icon, problem := read(map[string][]byte{"main.go": nil}); d != nil || icon != nil || problem != "" {
+		t.Fatal("no orrery.yaml describes nothing")
 	}
-	if icon, problem := logo(map[string][]byte{"orrery.yaml": []byte("service: github/example/app\n")}); icon != nil || problem != "" {
-		t.Fatal("no icon key names no logo")
+	if d, icon, problem := read(map[string][]byte{"orrery.yaml": []byte("service: github/example/app\n")}); d == nil || icon != nil || problem != "" {
+		t.Fatal("no icon key names no logo, and the description stands")
 	}
-	for file, want := range map[string]map[string][]byte{
-		"does not match":           {"orrery.yaml": []byte("service: s\nicon: {name: App, file: logo.svg}\n"), "logo.svg": svg},
-		"not .svg, .png, or .webp": {"orrery.yaml": []byte("service: s\nicon: {name: app, file: logo.gif}\n"), "logo.gif": svg},
-		"not in the repository":    {"orrery.yaml": []byte("service: s\nicon: {name: app, file: logo.svg}\n")},
-		"over 262144":              {"orrery.yaml": []byte("service: s\nicon: {name: app, file: logo.png}\n"), "logo.png": make([]byte, 256*1024+1)},
-		"no service":               {"orrery.yaml": []byte("icon: {name: app, file: logo.svg}\n"), "logo.svg": svg},
-		"a name and a file":        {"orrery.yaml": []byte("service: s\nicon: {name: app}\n")},
+	if d, _, problem := read(map[string][]byte{"orrery.yaml": []byte("service: github/example/app\nicon: {name: app, file: logo.svg}\n")}); d == nil || !strings.Contains(problem, "not in the repository") {
+		t.Fatalf("a missing logo costs only the logo: %+v, %q", d, problem)
+	}
+	for want, files := range map[string]map[string][]byte{
+		"a name matching ^":        {"orrery.yaml": []byte("service: github/example/app\nicon: {name: App, file: logo.svg}\n"), "logo.svg": svg},
+		"not .svg, .png, or .webp": {"orrery.yaml": []byte("service: github/example/app\nicon: {name: app, file: logo.gif}\n"), "logo.gif": svg},
+		"over 262144":              {"orrery.yaml": []byte("service: github/example/app\nicon: {name: app, file: logo.png}\n"), "logo.png": make([]byte, 256*1024+1)},
+		"service is required":      {"orrery.yaml": []byte("icon: {name: app, file: logo.svg}\n"), "logo.svg": svg},
+		"a name matching":          {"orrery.yaml": []byte("service: github/example/app\nicon: {name: app}\n")},
+		"or a folder in it":        {"orrery.yaml": []byte("service: github/example/application\n")},
+		"kind \"soap\"":            {"orrery.yaml": []byte("service: github/example/app\nprovides: [{id: a, title: A, kind: soap}]\n")},
+		"listed twice":             {"orrery.yaml": []byte("service: github/example/app\nprovides: [{id: a, title: A, kind: rest}, {id: a, title: B, kind: rest}]\n")},
+		"leaves the repository":    {"orrery.yaml": []byte("service: github/example/app\nprovides: [{id: a, title: A, kind: rest, spec: ../x.yaml}]\n")},
+		"field \"Bad\"":            {"orrery.yaml": []byte("service: github/example/app\nfields: {Bad: 1}\n")},
+		"field unknown not found":  {"orrery.yaml": []byte("service: github/example/app\nunknown: 1\n")},
 	} {
-		if _, problem := logo(want); !strings.Contains(problem, file) {
-			t.Errorf("problem %q, want it to say %q", problem, file)
+		if _, _, problem := read(files); !strings.Contains(problem, want) {
+			t.Errorf("problem %q, want it to say %q", problem, want)
 		}
 	}
+}
+
+func TestSpecURL(t *testing.T) {
+	same(t, SpecURL("api/openapi.yaml", "https://github.com/acme/app", "github"), any("https://github.com/acme/app/blob/HEAD/api/openapi.yaml"))
+	same(t, SpecURL("./api/openapi.yaml", "https://gitlab.example.com/g/app", "gitlab"), any("https://gitlab.example.com/g/app/-/blob/HEAD/api/openapi.yaml"))
+	same(t, SpecURL("api.yaml", "https://dev.azure.com/o/p/_git/app", "azuredevops"), any("https://dev.azure.com/o/p/_git/app?path=/api.yaml"))
+	same(t, SpecURL("https://example.com/spec.json", "https://github.com/acme/app", "github"), any("https://example.com/spec.json"))
+	same(t, SpecURL("", "https://github.com/acme/app", "github"), nil)
 }
 
 func TestEachTerraformRootIsItsOwnService(t *testing.T) {

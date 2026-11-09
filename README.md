@@ -16,10 +16,23 @@ that can be rebuilt by one sweep.
 | --- | --- | --- |
 | `sw_repository` | inventory | forge, account, default branch, archived, visibility, language, last push, branch protection, alert counts, pull requests failing checks, days idle, the health rules, and a calculated `status` with `status_reason` |
 | `sw_pipeline` | inventory | one per workflow, build definition, or schedule: the latest default-branch run, schedule state, newest release build, 30-day success rate, median duration, a 60-day success trend, and a flaky flag. Runs stay on the forge. |
-| `sw_service` | inventory | each service found from the files that build it (folder, kind, language, icon, last human change, README, Dockerfile, tests), and its DORA measures |
+| `sw_service` | inventory | each service found from the files that build it (folder, kind, language, icon, last human change, README, Dockerfile, tests), and its DORA measures. The one a repository's `orrery.yaml` describes also carries its logo, the APIs it calls (`consumes`, `will_consume`), and the fields and relations that place it in the estate's scheme. |
+| `sw_api` | inventory | each API a repository's `orrery.yaml` says its service provides: kind, description, and where its definition is read |
 | `sw_deployment` | history, kept 180 days | each deployment a forge recorded, with lead time, commits carried, fix only, failed change, and restore time. Argo CD syncs another source writes get the same fields added. |
 | `sw_issue` | record, kept 90 days after closing | open issues and pull requests on every forge, linked to their repository |
 | `team` | fields only | the same DORA measures over a team's services, through the standard's `sw_service.team` |
+
+### What a repository says about itself
+
+A repository describes the service it builds in `orrery.yaml` at its root:
+its key, its logo, the APIs it provides and calls, and, for one estate, its
+place in that estate's scheme. redgreen reads the file with the services, at
+the same commit, so an estate lists exactly the services of the repositories
+it reads, and nothing it does not. The key must be the repository's own, or
+a folder in it. The place (`fields` and `relations`) is the estate's own
+words: it goes as a patch of its own, so a hub that lacks one of them keeps
+the service without its place. A file that cannot be used is logged and left
+out; the services still stand.
 
 ### Health
 
@@ -80,7 +93,6 @@ redgreen serve
 | `BOT_AUTHORS` | More commit authors that count as automation, comma separated. |
 | `ORRERY_URL` | The hub's machine surface. |
 | `ORRERY_TOKEN` | A source token, registered for the blueprints above. |
-| `ORRERY_PUSH_TOKEN` | A source token for `sw_service` and `sw_api`, for redgreen's own description. |
 | `ORRERY_READ_TOKEN` | An access token that may read: Argo CD syncs, apps, workloads, and incidents. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME` | OTLP traces and metrics; off when unset. |
 | `LOG_LEVEL` | `debug`, `info`, `warn`, or `error`. |
@@ -148,7 +160,6 @@ sweep, per repository read, and per outbound call, and these metrics:
 - `redgreen.webhooks` by provider and outcome
 - `redgreen.push.entities` by blueprint and outcome
 - `redgreen.sweep.last_success`, the time of the last sweep that reached every forge
-- `redgreen.orrery.describe` by outcome
 - `redgreen.actions.jobs` (finished), `redgreen.actions.job.wait` (queued
   to a runner taking it), and `redgreen.actions.job.duration` (on the
   runner), by `repository`, `runner` (`hosted` or `self-hosted`), and `os`,

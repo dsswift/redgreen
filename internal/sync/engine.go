@@ -316,7 +316,7 @@ func (e *Engine) services(ctx context.Context, p provider.Provider, t *tracked, 
 		e.o.Log.WarnContext(ctx, "services could not be read; the last answer stands", "repo", repo.FullName, "error", err)
 		return previous
 	}
-	found, out, err := services.Read(ctx, files, repo.Name, previous, e.o.Bots)
+	found, out, err := services.Read(ctx, files, key, repo.Name, previous, e.o.Bots)
 	if err != nil {
 		e.o.Log.WarnContext(ctx, "services could not be read; the last answer stands", "repo", repo.FullName, "error", err)
 		return previous
@@ -328,8 +328,10 @@ func (e *Engine) services(ctx context.Context, p provider.Provider, t *tracked, 
 	if out.Read > services.ReadBudget {
 		e.o.Log.WarnContext(ctx, "read budget spent; services found so far stand", "repo", repo.FullName, "budget", services.ReadBudget)
 	}
-	if found.IconProblem != "" {
-		e.o.Log.WarnContext(ctx, "repo names a logo that cannot be used; its services wear their language", "repo", repo.FullName, "problem", found.IconProblem)
+	if found.Problem != "" {
+		e.o.Log.WarnContext(ctx, "repo's orrery.yaml cannot be used in full; what it could not say is left out", "repo", repo.FullName, "problem", found.Problem)
+	} else if found.Described != nil {
+		e.o.Log.InfoContext(ctx, "repo describes a service", "repo", repo.FullName, "described", found.Described.Service, "apis", len(found.Described.Provides), "consumes", len(found.Described.Consumes))
 	}
 	if err := e.o.Store.PutServices(ctx, key, found); err != nil {
 		e.o.Log.WarnContext(ctx, "services not kept", "repo", repo.FullName, "error", err)
