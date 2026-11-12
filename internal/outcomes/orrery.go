@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/dsswift/orrery/sdk"
@@ -172,13 +173,29 @@ type Reader struct {
 // page is how many entities one list call asks for.
 const page = 2000
 
-// Entities reads every entity of a blueprint matching filter, decoded into T.
-func Entities[T any](ctx context.Context, r Reader, blueprint string, filter any) ([]T, error) {
+// Ask is one list read: the blueprint, which of its entities, and only the
+// fields and relations a mapping here reads. The hub answers each entity in
+// its usual shape, cut to those.
+type Ask struct {
+	Blueprint string
+	Filter    any
+	Fields    []string
+	Relations []string
+}
+
+// Entities reads every entity an ask matches, decoded into T.
+func Entities[T any](ctx context.Context, r Reader, ask Ask) ([]T, error) {
 	var out []T
 	for offset := 0; ; offset += page {
-		q := url.Values{"blueprint": {blueprint}, "limit": {fmt.Sprint(page)}, "offset": {fmt.Sprint(offset)}}
-		if filter != nil {
-			b, err := json.Marshal(filter)
+		q := url.Values{
+			"blueprint": {ask.Blueprint},
+			"limit":     {fmt.Sprint(page)},
+			"offset":    {fmt.Sprint(offset)},
+			"fields":    {strings.Join(ask.Fields, ",")},
+			"relations": {strings.Join(ask.Relations, ",")},
+		}
+		if ask.Filter != nil {
+			b, err := json.Marshal(ask.Filter)
 			if err != nil {
 				return nil, err
 			}
@@ -198,23 +215,36 @@ func Entities[T any](ctx context.Context, r Reader, blueprint string, filter any
 	}
 }
 
-// Read is one pass over what the hub holds: the Argo CD syncs of the last 200
-// days, the apps and workloads that place them, and the incidents since.
-func (r Reader) Read(ctx context.Context, since time.Time) ([]HubDeployment, []HubApp, []HubWorkload, []HubIncident, error) {
-	from := since.UTC().Format(time.RFC3339)
-	syncs, err := Entities[HubDeployment](ctx, r, "sw_deployment", map[string]any{"field": "deployed_at", "op": "gte", "value": from})
-	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("deployments: %w", err)
-	}
-	apps, err := Entities[HubApp](ctx, r, "argocd_app", nil)
-	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("argo cd apps: %w", err)
-	}
-	workloads, err := Entities[HubWorkload](ctx, r, "sw_workload", nil)
+// since is a filter on a datetime field from a moment on.
+func since(field string, from time.Time) map[string]any {
+	return map[string]any{"field": field, "op": "gte", "value": from.UTC().Format(time.RFC3339)}
+}
+
+// Read is one pass over what the hub holds: the workloads that place a sync
+// or an incident in a repository, the Argo CD apps, the syncs of an app
+// since `from`, and the incidents on a workload since. A sync
+// reaches a repository only through an app and its workload, and an incident
+// only through its workload, so a hub with no workloads is asked nothing more.
+func (r Reader) Read(ctx context.Context, from time.Time) ([]HubDeployment, []HubApp, []HubWorkload, []HubIncident, error) {
+	workloads, err := Entities[HubWorkload](ctx, r, Ask{Blueprint: "sw_workload", Fields: []string{"repo"}, Relations: []string{}})
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("workloads: %w", err)
 	}
-	incidents, err := Entities[HubIncident](ctx, r, "it_incident", map[string]any{"field": "opened_at", "op": "gte", "value": from})
+	if len(workloads) == 0 {
+		return nil, nil, nil, nil, nil
+	}
+	apps, err := Entities[HubApp](ctx, r, Ask{Blueprint: "argocd_app", Fields: []string{"repo_url"}, Relations: []string{"workload", "environment"}})
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("argo cd apps: %w", err)
+	}
+	var syncs []HubDeployment
+	if len(apps) > 0 {
+		syncs, err = Entities[HubDeployment](ctx, r, Ask{Blueprint: "sw_deployment", Filter: map[string]any{"and": []any{since("deployed_at", from), map[string]any{"relation": "app"}}}, Fields: []string{"status", "revision", "deployed_at"}, Relations: []string{"app"}})
+		if err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("deployments: %w", err)
+		}
+	}
+	incidents, err := Entities[HubIncident](ctx, r, Ask{Blueprint: "it_incident", Filter: map[string]any{"and": []any{since("opened_at", from), map[string]any{"relation": "workload"}}}, Fields: []string{"severity", "opened_at", "mitigated_at", "resolved_at"}, Relations: []string{"workload"}})
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("incidents: %w", err)
 	}
