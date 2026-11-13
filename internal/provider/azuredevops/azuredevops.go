@@ -57,6 +57,8 @@ type Provider struct {
 	token     string
 	expiresAt time.Time
 	languages map[string]languageEntry
+	// deployed holds each project's deployments, by organisation and project.
+	deployed map[string]*projectDeployments
 	// timelinesRead holds builds whose finished timeline was read, by when.
 	timelinesRead map[string]time.Time
 }
@@ -78,7 +80,7 @@ func New(cfg Config, store *state.Store, client *http.Client, log *slog.Logger) 
 	if cfg.Login == "" {
 		cfg.Login = "https://login.microsoftonline.com"
 	}
-	p := &Provider{cfg: cfg, store: store, http: client, quotas: &provider.Quotas{Provider: "azuredevops", Remaining: "X-RateLimit-Remaining", Limit: "X-RateLimit-Limit"}, log: log, languages: map[string]languageEntry{}, timelinesRead: map[string]time.Time{}}
+	p := &Provider{cfg: cfg, store: store, http: client, quotas: &provider.Quotas{Provider: "azuredevops", Remaining: "X-RateLimit-Remaining", Limit: "X-RateLimit-Limit"}, log: log, languages: map[string]languageEntry{}, deployed: map[string]*projectDeployments{}, timelinesRead: map[string]time.Time{}}
 	if p.Configured() {
 		log.Info("azure devops credentials: service principal", "organizations", cfg.Organizations)
 	} else {
@@ -224,11 +226,12 @@ type page[T any] struct {
 
 // list reads every item of a collection, following the continuation token.
 func list[T any](ctx context.Context, f *provider.Fetcher, u string, query url.Values) ([]T, error) {
-	return collect[T](ctx, f, u, query, provider.Get[page[T]])
+	return collect[T](ctx, f, u, query, provider.Get[page[T]], nil)
 }
 
-// collect reads every page through get: kept, or once.
-func collect[T any](ctx context.Context, f *provider.Fetcher, u string, query url.Values, get func(context.Context, *provider.Fetcher, string, func(provider.Answer) (page[T], error)) (page[T], error)) ([]T, error) {
+// collect reads pages through get, kept or once, to the last one, or until
+// enough says the page just read is the last one wanted.
+func collect[T any](ctx context.Context, f *provider.Fetcher, u string, query url.Values, get func(context.Context, *provider.Fetcher, string, func(provider.Answer) (page[T], error)) (page[T], error), enough func([]T) bool) ([]T, error) {
 	var out []T
 	cont := ""
 	for {
@@ -256,7 +259,7 @@ func collect[T any](ctx context.Context, f *provider.Fetcher, u string, query ur
 			return nil, err
 		}
 		out = append(out, pg.Items...)
-		if pg.Continuation == "" {
+		if pg.Continuation == "" || (enough != nil && enough(pg.Items)) {
 			return out, nil
 		}
 		cont = pg.Continuation
@@ -283,13 +286,6 @@ func (p *Provider) Repos(ctx context.Context, a provider.Account) ([]provider.Re
 		out = append(out, provider.RepoRef{ID: "azuredevops:" + r.ID, FullName: a.Login + "/" + r.Project.Name + "/" + r.Name})
 	}
 	return out, nil
-}
-
-// CommitsBetween is unknown: Azure DevOps compares only through a POST, which
-// no conditional request covers, and it records no deployments to carry commits.
-func (p *Provider) CommitsBetween(ctx context.Context, _ provider.Account, r *provider.Repo, base, head string) ([]provider.Commit, error) {
-	p.log.DebugContext(ctx, "commits between revisions not read on azure devops", "repo", r.FullName, "base", base, "head", head)
-	return nil, nil
 }
 
 // language is a repository's main language. One answer covers a whole
@@ -381,6 +377,9 @@ func (p *Provider) Sync(ctx context.Context, a provider.Account, ref provider.Re
 		return nil, err
 	}
 	if out.Pipelines, err = p.pipelines(ctx, f, s); err != nil {
+		return nil, err
+	}
+	if out.Deployments, err = p.deployments(ctx, f, s); err != nil {
 		return nil, err
 	}
 	out.OpenPRs = len(pulls.Value)
@@ -626,7 +625,7 @@ func (x *files) List(ctx context.Context) ([]string, error) {
 	items, err := collect[struct {
 		Path     string `json:"path"`
 		IsFolder bool   `json:"isFolder"`
-	}](ctx, x.f, x.git+"/items", query, provider.Once)
+	}](ctx, x.f, x.git+"/items", query, provider.Once, nil)
 	if err != nil {
 		return nil, err
 	}

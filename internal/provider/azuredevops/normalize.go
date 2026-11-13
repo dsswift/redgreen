@@ -75,7 +75,10 @@ type adoBuild struct {
 	SourceBranch  string `json:"sourceBranch"`
 	SourceVersion string `json:"sourceVersion"`
 	Reason        string `json:"reason"`
-	RequestedFor  *struct {
+	Repository    *struct {
+		ID string `json:"id"`
+	} `json:"repository"`
+	RequestedFor *struct {
 		DisplayName string `json:"displayName"`
 	} `json:"requestedFor"`
 	Links *struct {
@@ -124,6 +127,7 @@ type adoLanguageMetrics struct {
 
 type adoCommit struct {
 	CommitID string `json:"commitId"`
+	Comment  string `json:"comment"`
 	Author   *struct {
 		Name  string `json:"name"`
 		Email string `json:"email"`

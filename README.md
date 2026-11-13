@@ -79,6 +79,15 @@ deployments around it:
 - `restore_hours`: to the next good deployment, the fix, or the incident's
   `mitigated_at`, else its `resolved_at`.
 
+A deployment is what a forge records against an environment. On GitHub and
+GitLab that is a deployment. On Azure DevOps it is each job a pipeline ran
+against an environment (Pipelines, Environments), with the commit of the
+build it ran in; a build the forge no longer keeps takes its deployments
+with it. Azure DevOps shows an environment's deployments only to an identity
+with the Reader role on it. Give the application that role on each project's
+environments (Pipelines, Environments, Security), or the project's
+deployments are not read.
+
 ## Running it
 
 ```bash
