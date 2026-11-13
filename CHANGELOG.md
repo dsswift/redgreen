@@ -55,6 +55,12 @@ All notable changes to this project will be documented in this file. See [standa
 * one language list and open fields ([dafe517](https://github.com/dsswift/redgreen/commit/dafe5174f0f73ab5ec834e686569882f91c35749))
 * push forge deployments to orrery ([185abff](https://github.com/dsswift/redgreen/commit/185abff406076d4b4a343b502ade925caf96625e))
 
+## [1.5.1](https://github.com/dsswift/redgreen/compare/v1.5.0...v1.5.1) (2026-11-13)
+
+### Bug Fixes
+
+* **redgreen:** title the red and amber pipeline counts ([b8077da](https://github.com/dsswift/redgreen/commit/b8077da85e89bb5da14820e3bb617213d7505cb2))
+
 ## [1.5.0](https://github.com/dsswift/redgreen/compare/v1.4.2...v1.5.0) (2026-11-13)
 
 ### Features
