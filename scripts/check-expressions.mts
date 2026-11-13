@@ -16,7 +16,7 @@ import { pathToFileURL } from 'node:url'
 const [file, orreryDir = resolve(import.meta.dirname, '../../orrery')] = process.argv.slice(2)
 if (!file) throw new Error('usage: node scripts/check-expressions.mts <blueprints.json> [orrery checkout]')
 const from = (p: string) => import(pathToFileURL(resolve(orreryDir, p)).href)
-const { compile } = await from('src/server/expr.ts')
+const { compile } = await from('src/shared/expr.ts')
 const { blueprintSchema } = await from('src/server/blueprints.ts')
 const { aggregate } = await from('src/server/read.ts')
 
