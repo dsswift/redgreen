@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
-	"github.com/dsswift/orrery/sdk"
+	"github.com/dsswift/redgreen/internal/provider"
+	"github.com/dsswift/redgreen/internal/state"
 )
 
 // The hub's entities as /v1/entities answers them, the parts read here.
@@ -166,8 +168,22 @@ func MapIncidents(list []HubIncident, workloads []HubWorkload, gitlabHost string
 }
 
 // Reader reads the hub with an access token: a source token may not read.
+// Every page goes through `provider.Get`: the hub tags each list answer, so a
+// page asked again with its tag is answered 304 with nothing when nothing the
+// list reads has moved, and the page kept from the last answer is used.
 type Reader struct {
-	Client *sdk.Client
+	URL   string
+	Fetch *provider.Fetcher
+}
+
+// NewReader reads the hub at url with token, keeping each page's tag and
+// what it held in store. With no store, nothing is kept and every page is
+// asked in full.
+func NewReader(url, token string, store *state.Store, client *http.Client, log *slog.Logger) Reader {
+	auth := func(context.Context) (map[string]string, error) {
+		return map[string]string{"Authorization": "Bearer " + token}, nil
+	}
+	return Reader{URL: strings.TrimRight(url, "/"), Fetch: &provider.Fetcher{Store: store, HTTP: client, Scope: "orrery-read", Auth: auth, Log: log}}
 }
 
 // page is how many entities one list call asks for.
@@ -181,6 +197,12 @@ type Ask struct {
 	Filter    any
 	Fields    []string
 	Relations []string
+}
+
+// listed is one page of a list answer, decoded into T.
+type listed[T any] struct {
+	Entities []T `json:"entities"`
+	Total    int `json:"total"`
 }
 
 // Entities reads every entity an ask matches, decoded into T.
@@ -201,11 +223,15 @@ func Entities[T any](ctx context.Context, r Reader, ask Ask) ([]T, error) {
 			}
 			q.Set("filter", string(b))
 		}
-		var res struct {
-			Entities []T `json:"entities"`
-			Total    int `json:"total"`
+		address := r.URL + "/v1/entities?" + q.Encode()
+		var res listed[T]
+		var err error
+		if r.Fetch.Store == nil {
+			res, err = provider.Once(ctx, r.Fetch, address, provider.JSON[listed[T]])
+		} else {
+			res, err = provider.Get(ctx, r.Fetch, address, provider.JSON[listed[T]])
 		}
-		if err := r.Client.Call(ctx, http.MethodGet, "/v1/entities?"+q.Encode(), nil, &res); err != nil {
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, res.Entities...)
@@ -215,9 +241,25 @@ func Entities[T any](ctx context.Context, r Reader, ask Ask) ([]T, error) {
 	}
 }
 
-// since is a filter on a datetime field from a moment on.
+// since is a filter on a datetime field from a moment on. The hub is asked
+// from the start of that day, so the question, and the tag it is answered
+// with, stay the same all day; the caller trims to the moment itself.
 func since(field string, from time.Time) map[string]any {
-	return map[string]any{"field": field, "op": "gte", "value": from.UTC().Format(time.RFC3339)}
+	return map[string]any{"field": field, "op": "gte", "value": from.UTC().Truncate(24 * time.Hour).Format(time.RFC3339)}
+}
+
+// after keeps what a datetime field says is at or after a moment; a value that
+// is not a time is kept for the mapping to judge.
+func after[T any](list []T, at func(T) string, from time.Time) []T {
+	out := list[:0]
+	for _, x := range list {
+		t, err := time.Parse(time.RFC3339, at(x))
+		if err == nil && t.Before(from) {
+			continue
+		}
+		out = append(out, x)
+	}
+	return out
 }
 
 // Read is one pass over what the hub holds: the workloads that place a sync
@@ -243,10 +285,12 @@ func (r Reader) Read(ctx context.Context, from time.Time) ([]HubDeployment, []Hu
 		if err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("deployments: %w", err)
 		}
+		syncs = after(syncs, func(d HubDeployment) string { return d.Fields.DeployedAt }, from)
 	}
 	incidents, err := Entities[HubIncident](ctx, r, Ask{Blueprint: "it_incident", Filter: map[string]any{"and": []any{since("opened_at", from), map[string]any{"relation": "workload"}}}, Fields: []string{"severity", "opened_at", "mitigated_at", "resolved_at"}, Relations: []string{"workload"}})
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("incidents: %w", err)
 	}
+	incidents = after(incidents, func(i HubIncident) string { return i.Fields.OpenedAt }, from)
 	return syncs, apps, workloads, incidents, nil
 }

@@ -34,7 +34,10 @@ The forges' door into Orrery. Read `README.md` first.
   service and per team. `orrery.go` reads Argo CD syncs, apps, workloads, and
   `it_incident` back from Orrery with `ORRERY_READ_TOKEN`; a workload's `repo`
   URL, read by `repourl.go`, places a sync or an incident in a repository and
-  folder.
+  folder. Each page of a hub list goes through `provider.Get` like a forge
+  read, so an unchanged page is a 304. A question must read the same from one
+  cycle to the next, or its tag never matches: a time in a filter is asked by
+  the day (`since`) and trimmed to the moment in Go.
 - `internal/services` finds services from the files that build them. `Detect`
   is the only place a service is recognised. Bump `Rules` with any change to
   a rule, so every repository is read again.

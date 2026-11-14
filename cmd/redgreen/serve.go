@@ -82,8 +82,9 @@ func serve() error {
 		log.Warn("orrery push off: ORRERY_URL and ORRERY_TOKEN are not both set")
 	}
 	var reader *outcomes.Reader
-	if c := hub(cfg.OrreryReadToken, "orrery-read"); c != nil {
-		reader = &outcomes.Reader{Client: c}
+	if cfg.OrreryURL != "" && cfg.OrreryReadToken != "" {
+		r := outcomes.NewReader(cfg.OrreryURL, cfg.OrreryReadToken, store, client, base.With("component", "orrery-read"))
+		reader = &r
 	} else {
 		log.Info("orrery read off: ORRERY_URL and ORRERY_READ_TOKEN are not both set; Argo CD syncs and incidents are not read")
 	}

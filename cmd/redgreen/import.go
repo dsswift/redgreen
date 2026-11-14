@@ -175,7 +175,7 @@ func importHistory(path string) error {
 	client := &http.Client{Timeout: 60 * time.Second}
 	var incidents []outcomes.Incident
 	if cfg.OrreryReadToken != "" {
-		r := outcomes.Reader{Client: sdk.New(cfg.OrreryURL, cfg.OrreryReadToken, sdk.WithHTTPClient(client), sdk.WithLogger(log))}
+		r := outcomes.NewReader(cfg.OrreryURL, cfg.OrreryReadToken, nil, client, log)
 		_, _, workloads, raw, err := r.Read(ctx, time.Now().Add(-expiry-30*24*time.Hour))
 		if err != nil {
 			return err
