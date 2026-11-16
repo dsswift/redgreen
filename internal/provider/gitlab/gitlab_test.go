@@ -3,12 +3,14 @@ package gitlab
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dsswift/redgreen/internal/provider"
 	"github.com/dsswift/redgreen/internal/provider/providertest"
@@ -197,5 +199,43 @@ func TestOAuthRotatesAndSealsItsTokens(t *testing.T) {
 	}
 	if refreshes != 2 {
 		t.Fatalf("refreshes = %d, want 2", refreshes)
+	}
+}
+
+// firedRuns is count schedule pipelines as GitLab lists them, ids from first, one a day, oldest first.
+func firedRuns(first, count int) string {
+	var b strings.Builder
+	b.WriteString("[")
+	for i := range count {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		id := first + i
+		at := time.Date(2026, 8, 1, 3, 0, 0, 0, time.UTC).AddDate(0, 0, id)
+		fmt.Fprintf(&b, `{"id":%d,"iid":%d,"ref":"main","sha":"c%d","status":"success","source":"schedule","created_at":%q,"updated_at":%q,"web_url":"u%d"}`, id, id, id, at.Format(time.RFC3339), at.Format(time.RFC3339), id)
+	}
+	b.WriteString("]")
+	return b.String()
+}
+
+func TestScheduleRunsAreTheNewestWhenTheForgeListsOldestFirst(t *testing.T) {
+	routes := gitlabRoutes()
+	fired := "GET /api/v4/projects/42/pipeline_schedules/11/pipelines?"
+	// 39 runs, oldest first whatever sort asks for, and a first page whose page count is one run behind.
+	routes[strings.TrimSuffix(fired, "?")] = providertest.Route{Body: firedRuns(1, 30)}
+	routes[fired+"page=1&per_page=30&sort=desc"] = providertest.Route{Body: firedRuns(1, 30), Header: map[string]string{"X-Total-Pages": "1"}}
+	routes[fired+"page=2&per_page=30&sort=desc"] = providertest.Route{Body: firedRuns(31, 9), Header: map[string]string{"X-Total-Pages": "2"}}
+	forge := providertest.New(t, routes)
+	p, err := New(Config{URL: forge.URL, Token: "t", TokenAccounts: []string{"acme"}}, providertest.Store(t), forge.Client(), discard())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := p.Sync(context.Background(), provider.Account{Login: "acme"}, provider.RepoRef{ID: "gitlab:42", FullName: "acme/api"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs := r.Pipelines[1].Runs
+	if len(runs) != runsPerPipeline || runs[0].ID != "39" || runs[len(runs)-1].ID != "10" {
+		t.Fatalf("schedule runs = %d, newest %s, oldest %s; want the newest %d, 39 down to 10", len(runs), runs[0].ID, runs[len(runs)-1].ID, runsPerPipeline)
 	}
 }

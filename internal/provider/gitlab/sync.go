@@ -2,6 +2,7 @@ package gitlab
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"sort"
@@ -297,7 +298,9 @@ func (p *Provider) pipelines(ctx context.Context, project glProject, tags map[st
 	}
 	out := []provider.Pipeline{mainPipeline(project, state, order(runs, tags))}
 	for _, s := range schedules {
-		fired, err := one[[]glPipeline](ctx, f, p.api(fmt.Sprintf("projects/%d/pipeline_schedules/%d/pipelines", id, s.ID), q("per_page", strconv.Itoa(runsPerPipeline), "sort", "desc")))
+		fired, err := scheduleRuns(ctx, f, func(page int) string {
+			return p.api(fmt.Sprintf("projects/%d/pipeline_schedules/%d/pipelines", id, s.ID), q("per_page", strconv.Itoa(runsPerPipeline), "sort", "desc", "page", strconv.Itoa(page)))
+		})
 		if provider.IsStatus(err, 404) {
 			// Older GitLab releases lack the endpoint; the schedule is judged from its own clock.
 			p.log.InfoContext(ctx, "schedule runs unavailable on this gitlab; schedule shows no runs", "project", id, "schedule", s.ID)
@@ -313,6 +316,59 @@ func (p *Provider) pipelines(ctx context.Context, project glProject, tags map[st
 		out = append(out, schedulePipeline(project, s, ciDisabled, order(m, tags)))
 	}
 	return out, nil
+}
+
+// firedPage is one page of a schedule's pipelines and how many pages the forge said there were.
+type firedPage struct {
+	Items []glPipeline `json:"items"`
+	Pages int          `json:"pages"`
+}
+
+// scheduleRuns reads the newest pipelines a schedule fired. A GitLab that ignores sort on this list answers oldest
+// first, so its first page holds the oldest runs and the newest are on the last pages. The page count comes from
+// the first answer, which a 304 can leave behind the forge, so the walk goes on past it while a page is full. The
+// last two pages together always hold a full page of the newest runs.
+func scheduleRuns(ctx context.Context, f *provider.Fetcher, pageURL func(page int) string) ([]glPipeline, error) {
+	read := func(page int) (firedPage, error) {
+		return provider.Get(ctx, f, pageURL(page), func(a provider.Answer) (firedPage, error) {
+			var items []glPipeline
+			err := json.Unmarshal(a.Body, &items)
+			pages, _ := strconv.Atoi(a.Header.Get("X-Total-Pages"))
+			return firedPage{Items: items, Pages: pages}, err
+		})
+	}
+	first, err := read(1)
+	if err != nil {
+		return nil, err
+	}
+	n := len(first.Items)
+	if n < runsPerPipeline || first.Items[0].CreatedAt.After(first.Items[n-1].CreatedAt) {
+		return first.Items, nil
+	}
+	last, before, newest := max(first.Pages, 1), firedPage{}, first
+	if last > 1 {
+		if newest, err = read(last); err != nil {
+			return nil, err
+		}
+	}
+	if last > 2 {
+		if before, err = read(last - 1); err != nil {
+			return nil, err
+		}
+	} else if last == 2 {
+		before = first
+	}
+	for len(newest.Items) == runsPerPipeline {
+		next, err := read(last + 1)
+		if err != nil {
+			return nil, err
+		}
+		if len(next.Items) == 0 {
+			break
+		}
+		last, before, newest = last+1, newest, next
+	}
+	return append(append([]glPipeline{}, before.Items...), newest.Items...), nil
 }
 
 func order(m map[int64]glPipeline, tags map[string]bool) []provider.Run {
