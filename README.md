@@ -117,7 +117,7 @@ redgreen serve
 | `BOT_AUTHORS` | More commit authors that count as automation, comma separated. |
 | `FLAKY_WINDOW_RUNS`, `FLAKY_CLEAR_RUNS`, `FLAKY_MAX_AGE_DAYS` | The flaky rule: finished runs read, 20; passes in a row that clear it, 5; days evidence counts, 180. |
 | `ORRERY_URL` | The hub's machine surface. |
-| `ORRERY_TOKEN` | A source token, registered for the blueprints above. |
+| `ORRERY_TOKEN` | A source token, registered for the blueprints above, with a delete grant on `sw_deployment` so it can remove its copy of a job another source reports. |
 | `ORRERY_READ_TOKEN` | An access token that may read: Argo CD syncs, apps, workloads, and incidents. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME` | OTLP traces and metrics; off when unset. |
 | `LOG_LEVEL` | `debug`, `info`, `warn`, or `error`. |
