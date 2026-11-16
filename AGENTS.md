@@ -32,8 +32,9 @@ The forges' door into Orrery. Read `README.md` first.
 - `internal/outcomes` works out each deployment's lead time, commit count,
   fix-only flag, failed change, and restore time. Orrery aggregates them per
   service and per team. A forge job another source already reports with its
-  job address (`Reported`, `ReportedElsewhere`) is that source's deployment:
-  redgreen enriches it, deletes the copy it wrote, and writes none.
+  job address (`Reported`, `HandOver`) is that source's deployment: redgreen
+  enriches it, deletes every copy the hub holds under its own name, and
+  writes none.
   service and per team. `orrery.go` reads Argo CD syncs, apps, workloads, and
   `it_incident` back from Orrery with `ORRERY_READ_TOKEN`; a workload's `repo`
   URL, read by `repourl.go`, places a sync or an incident in a repository and

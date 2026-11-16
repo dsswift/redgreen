@@ -215,19 +215,29 @@ func TestReportedAsksForDeploymentsThatNameAJobAndAreNoSync(t *testing.T) {
 	}
 }
 
-func TestReportedElsewhereLeavesOutRedgreensOwn(t *testing.T) {
-	report := func(key, url string) HubReport {
+func TestHandOverGivesAJobToTheSourceThatReportsItAndDropsRedgreensCopy(t *testing.T) {
+	report := func(key, owner, url string) HubReport {
 		var r HubReport
-		r.Key, r.Fields.URL = key, url
+		r.Key, r.Owner, r.Fields.URL = key, owner, url
 		return r
 	}
+	const job7, job8, job9 = "https://gitlab.example.com/cloud/app/-/jobs/7", "https://gitlab.example.com/cloud/app/-/jobs/8", "https://gitlab.example.com/cloud/app/-/jobs/9"
 	own := map[string]bool{"gitlab/cloud/app/12": true}
-	got := ReportedElsewhere([]HubReport{
-		report("cloud/app/api/7", "https://gitlab.example.com/cloud/app/-/jobs/7"),
-		report("gitlab/cloud/app/12", "https://gitlab.example.com/cloud/app/-/jobs/8"),
-		report("cloud/app/web/9", ""),
+	got := HandOver([]HubReport{
+		report("cloud/app/api/7", "ci", job7),
+		// Written before redgreen kept track: its own, by owner, though not among the keys it holds now.
+		report("gitlab/cloud/app/11", "redgreen", job7),
+		report("gitlab/cloud/app/12", "redgreen", job8),
+		report("cloud/app/web/9", "ci", job9),
+		report("cloud/app/web/10", "ci", ""),
 	}, func(k string) bool { return own[k] })
-	if len(got) != 1 || got["https://gitlab.example.com/cloud/app/-/jobs/7"] != "cloud/app/api/7" {
-		t.Fatalf("reported elsewhere %v", got)
+	if len(got.Elsewhere) != 2 || got.Elsewhere[job7] != "cloud/app/api/7" || got.Elsewhere[job9] != "cloud/app/web/9" {
+		t.Fatalf("elsewhere %v", got.Elsewhere)
+	}
+	if len(got.Copies) != 1 || got.Copies[0] != "gitlab/cloud/app/11" {
+		t.Fatalf("copies %v; a job redgreen alone reports stays its own", got.Copies)
+	}
+	if none := HandOver([]HubReport{report("cloud/app/api/7", "ci", job7)}, func(string) bool { return false }); len(none.Elsewhere) != 0 || len(none.Copies) != 0 {
+		t.Fatalf("handed over %+v before redgreen holds anything", none)
 	}
 }

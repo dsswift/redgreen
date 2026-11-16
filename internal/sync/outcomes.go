@@ -67,8 +67,10 @@ func (e *Engine) pushOutcomes(ctx context.Context) {
 		if reports, err := e.o.Read.Reported(ctx, now.Add(-window)); err != nil {
 			e.o.Log.WarnContext(ctx, "deployments other sources report unreadable; forge deployments are written as redgreen's own", "error", err)
 		} else {
-			elsewhere = outcomes.ReportedElsewhere(reports, func(key string) bool { _, ok := forge[key]; return ok })
-			e.o.Log.InfoContext(ctx, "deployments other sources report read", "reports", len(reports), "forgeJobs", len(elsewhere))
+			handover := outcomes.HandOver(reports, func(key string) bool { _, ok := forge[key]; return ok })
+			elsewhere = handover.Elsewhere
+			e.o.Log.InfoContext(ctx, "deployments other sources report read", "reports", len(reports), "forgeJobs", len(elsewhere), "ownCopies", len(handover.Copies))
+			e.dropCopies(ctx, handover.Copies)
 		}
 		syncs, apps, workloads, raw, err := e.o.Read.Read(ctx, now.Add(-window))
 		if err != nil {
@@ -105,8 +107,7 @@ func (e *Engine) pushOutcomes(ctx context.Context) {
 			other = elsewhere[d.Deployment.URL]
 		}
 		if other != "" {
-			// Another source reports this job: its entity takes the outcome, and redgreen's own copy goes.
-			e.forget(ctx, r.Key, other)
+			// Another source reports this job: its entity takes the outcome.
 			x = sdk.Entity{Blueprint: catalog.Deployment, Key: other, Fields: o.Fields(), Relations: map[string]any{"repository": r.RepoKey}}
 		} else if argo[r.Key] {
 			rel := map[string]any{"repository": r.RepoKey}
@@ -143,24 +144,25 @@ func (e *Engine) pushOutcomes(ctx context.Context) {
 	span.End()
 }
 
-// forget deletes redgreen's own entity for a forge deployment another source
-// reports, once: only one redgreen wrote is deleted, and what it wrote is
-// forgotten, so the next pass asks nothing.
-func (e *Engine) forget(ctx context.Context, key, other string) {
-	h, err := e.o.Store.Written(ctx, catalog.Deployment, key)
-	if err != nil || h == "" {
-		return
+// dropCopies deletes redgreen's own entities for forge jobs another source
+// reports, and forgets what it wrote of them. One already gone counts as
+// deleted; one that fails stays in the hub, so the next pass finds it again.
+func (e *Engine) dropCopies(ctx context.Context, keys []string) {
+	deleted := 0
+	for _, key := range keys {
+		var gone *sdk.APIError
+		if err := e.o.Push.Delete(ctx, catalog.Deployment, key); err != nil && !(errors.As(err, &gone) && gone.Status == http.StatusNotFound) {
+			e.o.Log.WarnContext(ctx, "own copy of a deployment another source reports not deleted; tried again next pass", "deployment", key, "error", err)
+			continue
+		}
+		if err := e.o.Store.DeleteWritten(ctx, catalog.Deployment, key); err != nil {
+			e.o.Log.WarnContext(ctx, "deleted deployment not forgotten", "deployment", key, "error", err)
+		}
+		deleted++
 	}
-	var gone *sdk.APIError
-	if err := e.o.Push.Delete(ctx, catalog.Deployment, key); err != nil && !(errors.As(err, &gone) && gone.Status == http.StatusNotFound) {
-		e.o.Log.WarnContext(ctx, "own copy of a deployment another source reports not deleted; tried again next pass", "deployment", key, "reportedAs", other, "error", err)
-		return
+	if len(keys) > 0 {
+		e.o.Log.InfoContext(ctx, "own copies of deployments other sources report deleted", "deleted", deleted, "of", len(keys))
 	}
-	if err := e.o.Store.DeleteWritten(ctx, catalog.Deployment, key); err != nil {
-		e.o.Log.WarnContext(ctx, "deleted deployment not forgotten", "deployment", key, "error", err)
-		return
-	}
-	e.o.Log.InfoContext(ctx, "own copy of a deployment another source reports deleted", "deployment", key, "reportedAs", other)
 }
 
 // runRemembered writes deployments and remembers what took, so an unchanged

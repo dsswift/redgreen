@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -33,27 +34,64 @@ type HubDeployment struct {
 	} `json:"relations"`
 }
 
-// HubReport is an sw_deployment another source wrote that names the forge job
-// it records, such as a CI job that reports its own deploy.
+// HubReport is an sw_deployment that names the forge job it records by its
+// address: one a CI job reports itself, or redgreen's own.
 type HubReport struct {
 	Key    string `json:"key"`
+	Owner  string `json:"owner"`
 	Fields struct {
 		URL        string `json:"url"`
 		DeployedAt string `json:"deployed_at"`
 	} `json:"fields"`
 }
 
-// ReportedElsewhere is, by the forge job's address, the entity another source
-// keeps for a deployment. A deployment redgreen keeps under its own key is not
-// one: `own` says which keys those are.
-func ReportedElsewhere(reports []HubReport, own func(key string) bool) map[string]string {
-	out := map[string]string{}
+// Handover is what the hub says of the forge jobs another source reports.
+type Handover struct {
+	// Elsewhere is, by the forge job's address, the entity another source keeps for it.
+	Elsewhere map[string]string
+	// Copies are redgreen's own entities for those jobs, to be deleted.
+	Copies []string
+}
+
+// HandOver reads the reports for the jobs another source keeps. redgreen is
+// whoever owns one of its own keys (`own`), so it needs no name of its own; a
+// job reported by redgreen alone is redgreen's. Until the hub holds one of its
+// keys, nothing is handed over.
+func HandOver(reports []HubReport, own func(key string) bool) Handover {
+	self := map[string]bool{}
 	for _, r := range reports {
-		if r.Fields.URL == "" || own(r.Key) {
+		if own(r.Key) {
+			self[r.Owner] = true
+		}
+	}
+	out := Handover{Elsewhere: map[string]string{}}
+	if len(self) == 0 {
+		return out
+	}
+	byURL := map[string][]HubReport{}
+	for _, r := range reports {
+		if r.Fields.URL != "" {
+			byURL[r.Fields.URL] = append(byURL[r.Fields.URL], r)
+		}
+	}
+	for url, list := range byURL {
+		other := ""
+		for _, r := range list {
+			if !self[r.Owner] && (other == "" || r.Key < other) {
+				other = r.Key
+			}
+		}
+		if other == "" {
 			continue
 		}
-		out[r.Fields.URL] = r.Key
+		out.Elsewhere[url] = other
+		for _, r := range list {
+			if self[r.Owner] {
+				out.Copies = append(out.Copies, r.Key)
+			}
+		}
 	}
+	sort.Strings(out.Copies)
 	return out
 }
 
@@ -286,10 +324,10 @@ func after[T any](list []T, at func(T) string, from time.Time) []T {
 	return out
 }
 
-// Reported reads the deployments since `from` that a source other than an
-// Argo CD sync wrote with the forge job's address. A forge deployment one of
-// them reports is that source's: redgreen adds its outcome to it and keeps no
-// entity of its own.
+// Reported reads the deployments since `from` that name a forge job's address
+// and are no Argo CD sync, whoever wrote them. A forge job another source
+// reports is that source's: redgreen adds its outcome to it and keeps no
+// entity of its own (`HandOver`).
 func (r Reader) Reported(ctx context.Context, from time.Time) ([]HubReport, error) {
 	filter := map[string]any{"and": []any{since("deployed_at", from), map[string]any{"field": "url", "op": "exists"}, map[string]any{"not": map[string]any{"relation": "app"}}}}
 	list, err := Entities[HubReport](ctx, r, Ask{Blueprint: "sw_deployment", Filter: filter, Fields: []string{"url", "deployed_at"}, Relations: []string{}})
