@@ -86,7 +86,9 @@ func (e *Engine) entities(ctx context.Context, key string, now time.Time) (writt
 		if err != nil {
 			e.o.Log.WarnContext(ctx, "kept runs unreadable; judged from the forge's list alone", "repo", r.FullName, "error", err)
 		}
-		out.pipelines = append(out.pipelines, catalog.PipelineEntity(r, p, catalog.Judge(p, r.DefaultBranch, history, release, now)))
+		h := catalog.Judge(p, r.DefaultBranch, history, release, e.o.Flaky, now)
+		e.o.Log.DebugContext(ctx, "pipeline judged", "repo", r.FullName, "pipeline", p.ID, "flaky", h.Flaky, "flakyClearsInRuns", h.FlakyClearsIn)
+		out.pipelines = append(out.pipelines, catalog.PipelineEntity(r, p, h))
 	}
 	if t.found != nil {
 		out.services = catalog.ServiceEntities(r, t.found, e.logos(ctx, r, t.found))

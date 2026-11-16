@@ -84,6 +84,8 @@ const pipe = (f: Record<string, unknown>) => compute('sw_pipeline', { name: 'CI'
 expect('pipeline green', pipe({}), { status: 'green', status_reason: null })
 expect('pipeline failing', pipe({ default_branch_failing: true }), { status: 'red', status_reason: 'CI failing on main', default_branch_failing_level: 'red' })
 expect('pipeline flaky', pipe({ flaky: true }), { status: 'amber', status_reason: 'CI is flaky' })
+expect('pipeline flaky, three to clear', pipe({ flaky: true, flaky_clears_in_runs: 3 }), { status: 'amber', status_reason: 'CI is flaky: 3 more green runs in a row clear it' })
+expect('pipeline flaky, one to clear', pipe({ flaky: true, flaky_clears_in_runs: 1 }), { status: 'amber', status_reason: 'CI is flaky: 1 more green run clears it' })
 expect('pipeline failing and flaky', pipe({ default_branch_failing: true, flaky: true }), { status: 'red', status_reason: 'CI failing on main' })
 expect('pipeline muted', pipe({ default_branch_failing: true, muted: true }), { status: 'grey', status_reason: 'muted' })
 expect('pipeline of a muted repository', pipe({ default_branch_failing: true, repository_muted: true }), { status: 'grey', status_reason: 'muted' })

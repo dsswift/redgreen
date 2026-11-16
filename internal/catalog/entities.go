@@ -109,12 +109,16 @@ func PipelineEntity(r *provider.Repo, p provider.Pipeline, h Health) sdk.Entity 
 	if h.Trend != nil {
 		trend = h.Trend
 	}
+	var clearsIn any
+	if h.Flaky {
+		clearsIn = h.FlakyClearsIn
+	}
 	fields := map[string]any{
 		"url": p.URL, "system": string(r.Provider), "name": p.Name, "path": p.Path, "default_branch": r.DefaultBranch, "state": p.State,
 		"last_status": orNil(h.LastStatus), "last_run_at": stamp(h.LastRunAt), "last_run_url": orNil(h.LastRunURL),
 		"default_branch_failing": h.Failing, "failing_runs": h.FailingRuns, "failing_since": stamp(h.FailingFrom),
 		"schedule_state": h.Schedule, "schedule_missed_since": stamp(h.ScheduleMissedSince), "last_scheduled_run_at": stamp(h.LastScheduledRun),
-		"release_ref": orNil(h.ReleaseRef), "release_build_failed": h.ReleaseFailed, "flaky": h.Flaky,
+		"release_ref": orNil(h.ReleaseRef), "release_build_failed": h.ReleaseFailed, "flaky": h.Flaky, "flaky_clears_in_runs": clearsIn,
 		"runs_30d": h.Runs30d, "success_rate_30d": rate, "duration_p50_seconds": p50, "trend_month": orNil(h.TrendMonth), "success_trend": trend,
 	}
 	return sdk.Entity{Blueprint: Pipeline, Key: PipelineKey(repo, p.ID), Title: r.FullName + " / " + p.Name, Fields: fields, Relations: map[string]any{"repository": repo}}

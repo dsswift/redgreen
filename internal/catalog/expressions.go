@@ -34,7 +34,7 @@ var PipelineRules = []Rule{
 	{Field: "schedule_stale", Severity: "amber", Title: "Schedule stopped", Help: "The schedule missed its runs, or the forge switched it off for inactivity.",
 		Calculation: "schedule_state == 'missed' || schedule_state == 'disabled'"},
 	{Field: "release_build_failed", Severity: "red", Title: "Release build failed", Help: "The run for the repository's newest release or tag failed."},
-	{Field: "flaky", Severity: "amber", Title: "Flaky", Help: "In the last 30 days one commit both passed and failed."},
+	{Field: "flaky", Severity: "amber", Title: "Flaky", Help: "One commit both passed and failed in the pipeline's recent runs, and too few runs in a row have passed since. The reason says how many more clear it."},
 }
 
 // RepositoryRules are the rules on sw_repository. Its pipelines' rules reach it through their status.
@@ -62,7 +62,8 @@ var (
 		" : default_branch_failing_level == status ? name + ' failing on ' + default_branch" +
 		" : schedule_stale_level == status ? (schedule_state == 'disabled' ? name + ' schedule switched off by the forge' : name + ' schedule stopped')" +
 		" : release_build_failed_level == status ? name + ' build failed for release ' + coalesce(release_ref, '')" +
-		" : name + ' is flaky'"
+		" : flaky_clears_in_runs == null ? name + ' is flaky'" +
+		" : name + ' is flaky: ' + flaky_clears_in_runs + (flaky_clears_in_runs == 1 ? ' more green run clears it' : ' more green runs in a row clear it')"
 )
 
 // Repository calculations, in order.

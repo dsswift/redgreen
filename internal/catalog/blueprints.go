@@ -167,6 +167,7 @@ func PipelineBlueprint() sdk.Blueprint {
 			f("schedule_missed_since", typed("datetime")),
 			f("last_scheduled_run_at", typed("datetime")),
 			f("release_ref", typed("string", "description", "The newest release or tag the repository's pipelines ran for.")),
+			f("flaky_clears_in_runs", typed("number", "title", "Green runs to clear flaky", "description", "How many more runs in a row must pass before Flaky clears; empty while it is not flaky.")),
 			f("runs_30d", typed("number", "title", "Runs (30d)")),
 			f("success_rate_30d", typed("number", "title", "Success rate (30d, %)")),
 			f("duration_p50_seconds", typed("number", "title", "Median duration (s)", "description", "Of successful runs in the last 30 days.")),

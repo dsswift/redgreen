@@ -48,10 +48,23 @@ repository or a pipeline.
 | `default_branch_failing`: the latest automatic run on the default branch failed | pipeline | red |
 | `schedule_stale`: two expected scheduled runs did not come, or the forge switched the schedule off | pipeline | amber |
 | `release_build_failed`: the run for the newest release or tag failed | pipeline | red |
-| `flaky`: one commit both passed and failed in the last 30 days | pipeline | amber |
+| `flaky`: one commit both passed and failed in the recent runs, and too few runs have passed since | pipeline | amber |
 | `critical_alerts`: open critical dependency or code scanning alerts | repository | red |
 | `pr_checks_failing`: an open, ready pull request has failing checks | repository | red |
 | `archive_candidate`: idle 90 days or more, and red | repository | amber |
+
+`flaky` counts runs, not days, so it follows how often a pipeline runs. It
+reads the newest 20 finished runs of any branch. The evidence is a run whose
+result differs from the run before it on the same commit. The flag clears
+once the newest 5 runs have all passed with no such evidence after the first
+of them, and `status_reason` says how many more green runs that takes
+(`flaky_clears_in_runs`). An hourly pipeline clears in 5 hours and a nightly
+one in 5 nights. Evidence older than 180 days is dropped, so a pipeline that
+runs a few times a year is not held amber by one bad day for years; without
+that bound it would wait more than a year for 5 runs. `FLAKY_WINDOW_RUNS`,
+`FLAKY_CLEAR_RUNS`, and `FLAKY_MAX_AGE_DAYS` change the three numbers. A
+forge lists at most 30 runs of a pipeline and redgreen keeps runs for 60
+days, so a wider window reaches no further for a pipeline that runs seldom.
 
 A repository's status is the worst of its own rules and its pipelines'
 statuses, read through `<-sw_pipeline:repository`. Muted and disabled
@@ -102,6 +115,7 @@ redgreen serve
 | `SYNC_INTERVAL_MINUTES` | Minutes between sweeps, 5. |
 | `SYNC_CONCURRENCY` | Repositories read at once, 4. |
 | `BOT_AUTHORS` | More commit authors that count as automation, comma separated. |
+| `FLAKY_WINDOW_RUNS`, `FLAKY_CLEAR_RUNS`, `FLAKY_MAX_AGE_DAYS` | The flaky rule: finished runs read, 20; passes in a row that clear it, 5; days evidence counts, 180. |
 | `ORRERY_URL` | The hub's machine surface. |
 | `ORRERY_TOKEN` | A source token, registered for the blueprints above. |
 | `ORRERY_READ_TOKEN` | An access token that may read: Argo CD syncs, apps, workloads, and incidents. |

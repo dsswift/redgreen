@@ -19,6 +19,11 @@ type Config struct {
 	SyncInterval time.Duration
 	Concurrency  int
 	BotAuthors   []string
+	// The flaky rule: the newest finished runs read for evidence, the passes
+	// in a row that clear it, and the oldest evidence that counts, in days.
+	FlakyWindowRuns int
+	FlakyClearRuns  int
+	FlakyMaxAgeDays int
 	// SecretKey seals credentials kept in the state: base64 of 32 bytes.
 	SecretKey string
 
@@ -101,7 +106,11 @@ func Parse(get func(string) string) (Config, error) {
 		SyncInterval: time.Duration(num("SYNC_INTERVAL_MINUTES", 5)) * time.Minute,
 		Concurrency:  num("SYNC_CONCURRENCY", 4),
 		BotAuthors:   list("BOT_AUTHORS"),
-		SecretKey:    str("SECRET_KEY", ""),
+
+		FlakyWindowRuns: num("FLAKY_WINDOW_RUNS", 20),
+		FlakyClearRuns:  num("FLAKY_CLEAR_RUNS", 5),
+		FlakyMaxAgeDays: num("FLAKY_MAX_AGE_DAYS", 180),
+		SecretKey:       str("SECRET_KEY", ""),
 
 		OrreryURL:       link("ORRERY_URL", ""),
 		OrreryToken:     str("ORRERY_TOKEN", ""),

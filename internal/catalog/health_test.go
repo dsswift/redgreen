@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
 
@@ -31,7 +32,7 @@ func pipe(runs ...provider.Run) provider.Pipeline {
 }
 
 func judge(p provider.Pipeline) Health {
-	return Judge(p, "main", nil, JudgeRelease([]provider.Pipeline{p}), now)
+	return Judge(p, "main", nil, JudgeRelease([]provider.Pipeline{p}), DefaultFlaky, now)
 }
 
 func fails(r *provider.Run)     { r.Conclusion = provider.Failure }
@@ -124,16 +125,101 @@ func TestReleaseBuilds(t *testing.T) {
 
 func TestFlaky(t *testing.T) {
 	h := judge(pipe(run("2026-09-29T10:00:00Z", nil), run("2026-09-29T09:00:00Z", fails)))
-	if !h.Flaky {
-		t.Error("a pass and a fail on one commit is flaky")
+	if !h.Flaky || h.FlakyClearsIn != 4 {
+		t.Errorf("a pass and a fail on one commit is flaky, 4 more passes from clear: %v %d", h.Flaky, h.FlakyClearsIn)
 	}
 	h = judge(pipe(run("2026-09-29T10:00:00Z", func(r *provider.Run) { r.SHA = "new" }), run("2026-09-29T09:00:00Z", fails)))
-	if h.Flaky {
+	if h.Flaky || h.FlakyClearsIn != 0 {
 		t.Error("a fix on a new commit is not flaky")
 	}
-	old := Judge(pipe(), "main", []provider.Run{run("2026-07-01T10:00:00Z", nil), run("2026-07-01T09:00:00Z", fails)}, Release{}, now)
-	if old.Flaky {
-		t.Error("only the last 30 days count")
+}
+
+// cadence is a pipeline's finished runs, one every step and the newest one
+// step before now, newest first. Each letter is a run: P passed, F failed. A
+// lower-case letter ran on its own new commit; an upper-case one ran again on
+// the commit of the run before it.
+func cadence(step time.Duration, newestFirst string) []provider.Run {
+	n := len(newestFirst)
+	runs := make([]provider.Run, n)
+	sha := ""
+	for i := n - 1; i >= 0; i-- {
+		c := newestFirst[i]
+		if sha == "" || c == 'p' || c == 'f' {
+			sha = "commit-" + strconv.Itoa(i)
+		}
+		at := now.Add(-time.Duration(i+1) * step)
+		runs[i] = run(at.Format(time.RFC3339Nano), func(r *provider.Run) {
+			r.SHA = sha
+			if c == 'f' || c == 'F' {
+				r.Conclusion = provider.Failure
+			}
+		})
+	}
+	return runs
+}
+
+// TestFlakyFollowsRunsNotDays checks one rule fits every cadence: the flag
+// counts runs since a commit last changed its result, whatever the days.
+func TestFlakyFollowsRunsNotDays(t *testing.T) {
+	hour, day := time.Hour, 24*time.Hour
+	cases := []struct {
+		name     string
+		step     time.Duration
+		runs     string
+		flaky    bool
+		clearsIn int
+	}{
+		// An hourly pipeline: a commit failed 6 hours ago, passed on a second try, and 4 more runs passed.
+		{"hourly, cleared by 5 passes in 5 hours", hour, "ppppPf", false, 0},
+		{"hourly, 3 passes so far: 2 more clear it", hour, "ppPf", true, 2},
+		// The flake is a day old: 21 runs back, outside the 20 read.
+		{"hourly, evidence older than 20 runs", hour, "fffffffffffffffffffpPf", false, 0},
+		// A nightly schedule on one unchanged commit: one bad night, 7 good nights since.
+		{"nightly on one commit, 7 good nights since", day, "PPPPPPPFp", false, 0},
+		{"nightly on one commit, 4 good nights since", day, "PPPPFp", true, 1},
+		{"every 12 days, 36 days after the evidence but only 3 passes", 12 * day, "ppPf", true, 2},
+		// A pipeline that runs four times a year: 30 days would have forgotten this.
+		{"quarterly, evidence 90 days old still counts", 90 * day, "Pf", true, 4},
+		{"quarterly, one pass since the evidence", 80 * day, "pPf", true, 3},
+		{"quarterly, evidence past 180 days is dropped", 90 * day, "ppPf", false, 0},
+		// A failure after the evidence starts the count again.
+		{"a new failure restarts the count", hour, "ppfppppPf", true, 3},
+		{"failing again on the same commit is new evidence", hour, "FPf", true, 5},
+		{"failures on different commits are not flaky", hour, "pfpfpf", false, 0},
+	}
+	for _, c := range cases {
+		h := Judge(pipe(), "main", cadence(c.step, c.runs), Release{}, DefaultFlaky, now)
+		if h.Flaky != c.flaky || h.FlakyClearsIn != c.clearsIn {
+			t.Errorf("%s: flaky %v clears in %d, want %v %d", c.name, h.Flaky, h.FlakyClearsIn, c.flaky, c.clearsIn)
+		}
+	}
+}
+
+func TestFlakyRuleTakesItsNumbers(t *testing.T) {
+	runs := cadence(time.Hour, "ppPf")
+	h := Judge(pipe(), "main", runs, Release{}, FlakyRule{Window: 20, Clear: 2, MaxAge: 24 * time.Hour}, now)
+	if h.Flaky {
+		t.Error("2 passes clear it when the rule says 2")
+	}
+	h = Judge(pipe(), "main", runs, Release{}, FlakyRule{Window: 3}, now)
+	if h.Flaky {
+		t.Error("a window of 3 runs does not reach evidence 4 runs back")
+	}
+	h = Judge(pipe(), "main", runs, Release{}, FlakyRule{}, now)
+	if !h.Flaky || h.FlakyClearsIn != 2 {
+		t.Errorf("an unset rule takes the defaults: %v %d", h.Flaky, h.FlakyClearsIn)
+	}
+}
+
+func TestFlakyReadsThroughUnfinishedAndCancelledRuns(t *testing.T) {
+	h := judge(pipe(
+		run("2026-09-29T11:00:00Z", func(r *provider.Run) { r.Status, r.Conclusion, r.SHA = "in_progress", "", "next" }),
+		run("2026-09-29T10:30:00Z", func(r *provider.Run) { r.Conclusion, r.SHA = provider.Cancelled, "next" }),
+		run("2026-09-29T10:00:00Z", nil),
+		run("2026-09-29T09:00:00Z", fails),
+	))
+	if !h.Flaky || h.FlakyClearsIn != 4 {
+		t.Errorf("only finished passes and failures count: %v %d", h.Flaky, h.FlakyClearsIn)
 	}
 }
 
@@ -147,7 +233,7 @@ func TestMeasuresUseTheKeptHistory(t *testing.T) {
 			}
 		}))
 	}
-	h := Judge(pipe(), "main", history, Release{}, now)
+	h := Judge(pipe(), "main", history, Release{}, DefaultFlaky, now)
 	if h.Runs30d != 29 || *h.SuccessRate != 100 || h.TrendMonth != "improving" || *h.DurationP50 != 120 || h.Trend == nil {
 		t.Errorf("runs %d rate %v trend %s p50 %v", h.Runs30d, *h.SuccessRate, h.TrendMonth, *h.DurationP50)
 	}
@@ -166,8 +252,8 @@ func TestMeasuresHoldStillBetweenSweeps(t *testing.T) {
 		run(now.Add(-60*24*time.Hour+5*time.Minute).Format(time.RFC3339), nil),
 		run("2026-08-03T08:00:00Z", nil),
 	}
-	first := Judge(pipe(), "main", history, Release{}, now)
-	second := Judge(pipe(), "main", history, Release{}, now.Add(10*time.Minute))
+	first := Judge(pipe(), "main", history, Release{}, DefaultFlaky, now)
+	second := Judge(pipe(), "main", history, Release{}, DefaultFlaky, now.Add(10*time.Minute))
 	if !reflect.DeepEqual(first.Trend, second.Trend) {
 		t.Errorf("success_trend moved between sweeps:\n%v\n%v", first.Trend, second.Trend)
 	}
@@ -185,7 +271,7 @@ func TestSuccessTrendBucketsByCalendarWeek(t *testing.T) {
 		run("2026-09-27T23:55:00Z", nil),
 		run("2026-09-21T00:00:00Z", fails),
 	}
-	h := Judge(pipe(), "main", history, Release{}, now)
+	h := Judge(pipe(), "main", history, Release{}, DefaultFlaky, now)
 	points := h.Trend["points"].([]map[string]any)
 	want := []map[string]any{{"at": "2026-09-21T00:00:00Z", "value": 50.0}, {"at": "2026-09-28T00:00:00Z", "value": 50.0}}
 	if !reflect.DeepEqual(points, want) {

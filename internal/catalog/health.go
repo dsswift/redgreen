@@ -42,18 +42,20 @@ type Health struct {
 	ReleaseRef    string
 	ReleaseFailed bool
 
-	Flaky       bool
-	Runs30d     int
-	SuccessRate *float64
-	DurationP50 *float64
-	TrendMonth  string
-	Trend       map[string]any
+	Flaky bool
+	// FlakyClearsIn is how many more passes in a row clear Flaky; 0 while it is not flaky.
+	FlakyClearsIn int
+	Runs30d       int
+	SuccessRate   *float64
+	DurationP50   *float64
+	TrendMonth    string
+	Trend         map[string]any
 }
 
 // Judge works out a pipeline's health at now. runs are the forge's recent
 // runs, newest first; history is every run redgreen kept for it, for the
 // windows a forge's short list cannot cover.
-func Judge(p provider.Pipeline, defaultBranch string, history []provider.Run, release Release, now time.Time) Health {
+func Judge(p provider.Pipeline, defaultBranch string, history []provider.Run, release Release, flaky FlakyRule, now time.Time) Health {
 	var h Health
 	var branch []provider.Run
 	for _, r := range p.Runs {
@@ -72,7 +74,7 @@ func Judge(p provider.Pipeline, defaultBranch string, history []provider.Run, re
 		h.ReleaseFailed = release.Failed[p.ID]
 	}
 	all := merged(p.Runs, history)
-	h.Flaky = flaky(all, now)
+	h.Flaky, h.FlakyClearsIn = flaky.judge(all, now)
 	h.Runs30d, h.SuccessRate, h.DurationP50, h.TrendMonth, h.Trend = measures(all, defaultBranch, now)
 	return h
 }
@@ -231,26 +233,80 @@ func merged(runs, history []provider.Run) []provider.Run {
 	return out
 }
 
-// flaky is a pass and a failure on one commit in the last 30 days.
-func flaky(runs []provider.Run, now time.Time) bool {
-	outcomes := map[string]int{}
+// FlakyRule sizes the flaky rule in runs, so it follows how often a pipeline
+// runs: a busy one looks back hours, a rare one months.
+type FlakyRule struct {
+	// Window is how many of the newest finished runs are read for evidence.
+	Window int
+	// Clear is how many passes in a row, with no evidence after the first, clear the flag.
+	Clear int
+	// MaxAge is how old evidence may be. Past it, a pipeline that runs too
+	// seldom to prove a fix stops being held by old history.
+	MaxAge time.Duration
+}
+
+// DefaultFlaky reads the newest 20 finished runs, clears after 5 passes in a
+// row, and drops evidence older than 180 days.
+var DefaultFlaky = FlakyRule{Window: 20, Clear: 5, MaxAge: 180 * 24 * time.Hour}
+
+// OrDefault fills each unset part from DefaultFlaky.
+func (f FlakyRule) OrDefault() FlakyRule {
+	if f.Window < 1 {
+		f.Window = DefaultFlaky.Window
+	}
+	if f.Clear < 1 {
+		f.Clear = DefaultFlaky.Clear
+	}
+	if f.MaxAge <= 0 {
+		f.MaxAge = DefaultFlaky.MaxAge
+	}
+	return f
+}
+
+// judge says whether a pipeline is flaky at now, and how many more passes in
+// a row would clear it. Evidence is a run whose result differs from the run
+// before it on the same commit: that commit both passed and failed. Only the
+// newest Window finished runs are read, and evidence older than MaxAge is
+// dropped. The flag holds until the newest Clear runs have all passed with no
+// evidence after the first of them.
+func (f FlakyRule) judge(runs []provider.Run, now time.Time) (bool, int) {
+	f = f.OrDefault()
+	var d []provider.Run
 	for _, r := range runs {
-		if now.Sub(r.CreatedAt) > 30*24*time.Hour || !decisive(r) || r.SHA == "" {
-			continue
-		}
-		switch {
-		case r.Conclusion == provider.Success:
-			outcomes[r.SHA] |= 1
-		case failed[r.Conclusion]:
-			outcomes[r.SHA] |= 2
+		if decisive(r) && r.SHA != "" && (r.Conclusion == provider.Success || failed[r.Conclusion]) {
+			d = append(d, r)
 		}
 	}
-	for _, o := range outcomes {
-		if o == 3 {
-			return true
-		}
+	sort.SliceStable(d, func(i, j int) bool { return d[i].CreatedAt.After(d[j].CreatedAt) })
+	if len(d) > f.Window {
+		d = d[:f.Window]
 	}
-	return false
+	// evidence is the index of the newest run that changed its commit's result.
+	evidence := -1
+	last := map[string]string{}
+	for i := len(d) - 1; i >= 0; i-- {
+		r := d[i]
+		outcome := provider.Success
+		if failed[r.Conclusion] {
+			outcome = provider.Failure
+		}
+		if before, ok := last[r.SHA]; ok && before != outcome && now.Sub(r.CreatedAt) <= f.MaxAge {
+			evidence = i
+		}
+		last[r.SHA] = outcome
+	}
+	if evidence < 0 {
+		return false, 0
+	}
+	// A pass that is itself the evidence counts: it is a green run too.
+	passes := 0
+	for passes <= evidence && d[passes].Conclusion == provider.Success {
+		passes++
+	}
+	if passes >= f.Clear {
+		return false, 0
+	}
+	return true, f.Clear - passes
 }
 
 // trendPoints is how far a window's success rate must move against the one

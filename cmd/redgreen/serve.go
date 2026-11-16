@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/dsswift/orrery/sdk"
+	"github.com/dsswift/redgreen/internal/catalog"
 	"github.com/dsswift/redgreen/internal/config"
 	"github.com/dsswift/redgreen/internal/outcomes"
 	"github.com/dsswift/redgreen/internal/provider"
@@ -93,7 +94,8 @@ func serve() error {
 		gitlabHost = u.Hostname()
 	}
 	engine := rgsync.New(rgsync.Options{Providers: providers, Store: store, Push: push, Read: reader, Tel: tel, Log: base.With("component", "sync"),
-		Bots: services.Bots{Extra: cfg.BotAuthors}, Interval: cfg.SyncInterval, Concurrency: cfg.Concurrency, GitLabHost: gitlabHost})
+		Bots: services.Bots{Extra: cfg.BotAuthors}, Interval: cfg.SyncInterval, Concurrency: cfg.Concurrency, GitLabHost: gitlabHost,
+		Flaky: catalog.FlakyRule{Window: cfg.FlakyWindowRuns, Clear: cfg.FlakyClearRuns, MaxAge: time.Duration(cfg.FlakyMaxAgeDays) * 24 * time.Hour}})
 	go engine.Run(ctx)
 
 	mux := http.NewServeMux()

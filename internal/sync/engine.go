@@ -39,6 +39,8 @@ type Options struct {
 	Interval    time.Duration
 	Concurrency int
 	GitLabHost  string
+	// Flaky sizes the flaky rule; an unset part takes its default.
+	Flaky catalog.FlakyRule
 }
 
 // tracked is one repository as the last read left it.
