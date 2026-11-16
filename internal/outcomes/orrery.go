@@ -33,6 +33,30 @@ type HubDeployment struct {
 	} `json:"relations"`
 }
 
+// HubReport is an sw_deployment another source wrote that names the forge job
+// it records, such as a CI job that reports its own deploy.
+type HubReport struct {
+	Key    string `json:"key"`
+	Fields struct {
+		URL        string `json:"url"`
+		DeployedAt string `json:"deployed_at"`
+	} `json:"fields"`
+}
+
+// ReportedElsewhere is, by the forge job's address, the entity another source
+// keeps for a deployment. A deployment redgreen keeps under its own key is not
+// one: `own` says which keys those are.
+func ReportedElsewhere(reports []HubReport, own func(key string) bool) map[string]string {
+	out := map[string]string{}
+	for _, r := range reports {
+		if r.Fields.URL == "" || own(r.Key) {
+			continue
+		}
+		out[r.Fields.URL] = r.Key
+	}
+	return out
+}
+
 // HubApp is an Argo CD application.
 type HubApp struct {
 	Key    string `json:"key"`
@@ -260,6 +284,19 @@ func after[T any](list []T, at func(T) string, from time.Time) []T {
 		out = append(out, x)
 	}
 	return out
+}
+
+// Reported reads the deployments since `from` that a source other than an
+// Argo CD sync wrote with the forge job's address. A forge deployment one of
+// them reports is that source's: redgreen adds its outcome to it and keeps no
+// entity of its own.
+func (r Reader) Reported(ctx context.Context, from time.Time) ([]HubReport, error) {
+	filter := map[string]any{"and": []any{since("deployed_at", from), map[string]any{"field": "url", "op": "exists"}, map[string]any{"not": map[string]any{"relation": "app"}}}}
+	list, err := Entities[HubReport](ctx, r, Ask{Blueprint: "sw_deployment", Filter: filter, Fields: []string{"url", "deployed_at"}, Relations: []string{}})
+	if err != nil {
+		return nil, fmt.Errorf("reported deployments: %w", err)
+	}
+	return after(list, func(d HubReport) string { return d.Fields.DeployedAt }, from), nil
 }
 
 // Read is one pass over what the hub holds: the workloads that place a sync

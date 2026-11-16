@@ -282,6 +282,12 @@ func (s *Store) PutWritten(ctx context.Context, blueprint, key, hash string) err
 	return err
 }
 
+// DeleteWritten forgets what was written for an entity that is gone.
+func (s *Store) DeleteWritten(ctx context.Context, blueprint, key string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM written WHERE blueprint = ? AND key = ?`, blueprint, key)
+	return err
+}
+
 // Setting decodes a kept value into v and says whether there was one.
 func (s *Store) Setting(ctx context.Context, key string, v any) (bool, error) {
 	var raw string

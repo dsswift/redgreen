@@ -192,3 +192,42 @@ func TestReadAsksForNoSyncsWithoutAnApp(t *testing.T) {
 		}
 	}
 }
+
+func TestReportedAsksForDeploymentsThatNameAJobAndAreNoSync(t *testing.T) {
+	h := &hub{answer: map[string][]map[string]any{"sw_deployment": {
+		{"key": "cloud/app/api/7", "fields": map[string]any{"url": "https://gitlab.example.com/cloud/app/-/jobs/7", "deployed_at": "2026-05-02T00:00:00Z"}},
+		{"key": "cloud/app/api/3", "fields": map[string]any{"url": "https://gitlab.example.com/cloud/app/-/jobs/3", "deployed_at": "2026-04-20T00:00:00Z"}},
+	}}}
+	list, err := reader(t, h).Reported(context.Background(), from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].Key != "cloud/app/api/7" {
+		t.Fatalf("reported %+v; the one before `from` should be trimmed", list)
+	}
+	var filter map[string]any
+	if err := json.Unmarshal([]byte(h.asked[0].Get("filter")), &filter); err != nil {
+		t.Fatal(err)
+	}
+	want := `{"and":[{"field":"deployed_at","op":"gte","value":"2026-05-01T00:00:00Z"},{"field":"url","op":"exists"},{"not":{"relation":"app"}}]}`
+	if got, _ := json.Marshal(filter); string(got) != want {
+		t.Fatalf("asked %s, want %s", got, want)
+	}
+}
+
+func TestReportedElsewhereLeavesOutRedgreensOwn(t *testing.T) {
+	report := func(key, url string) HubReport {
+		var r HubReport
+		r.Key, r.Fields.URL = key, url
+		return r
+	}
+	own := map[string]bool{"gitlab/cloud/app/12": true}
+	got := ReportedElsewhere([]HubReport{
+		report("cloud/app/api/7", "https://gitlab.example.com/cloud/app/-/jobs/7"),
+		report("gitlab/cloud/app/12", "https://gitlab.example.com/cloud/app/-/jobs/8"),
+		report("cloud/app/web/9", ""),
+	}, func(k string) bool { return own[k] })
+	if len(got) != 1 || got["https://gitlab.example.com/cloud/app/-/jobs/7"] != "cloud/app/api/7" {
+		t.Fatalf("reported elsewhere %v", got)
+	}
+}

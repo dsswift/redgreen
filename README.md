@@ -18,7 +18,7 @@ that can be rebuilt by one sweep.
 | `sw_pipeline` | inventory | one per workflow, build definition, or schedule: the latest default-branch run, schedule state, newest release build, 30-day success rate, median duration, a 60-day success trend, and a flaky flag. Runs stay on the forge. |
 | `sw_service` | inventory | each service found from the files that build it (folder, kind, language, icon, last human change, README, Dockerfile, tests), and its DORA measures. The one a repository's `orrery.yaml` describes also carries its logo, the APIs it calls (`consumes`, `will_consume`), and the fields and relations that place it in the estate's scheme. |
 | `sw_api` | inventory | each API a repository's `orrery.yaml` says its service provides: kind, description, and where its definition is read |
-| `sw_deployment` | history, kept 180 days | each deployment a forge recorded, with lead time, commits carried, fix only, failed change, and restore time. Argo CD syncs another source writes get the same fields added. |
+| `sw_deployment` | history, kept 180 days | each deployment a forge recorded, with lead time, commits carried, fix only, failed change, and restore time. Argo CD syncs another source writes get the same fields added, and so does a forge job another source already reports by its address: that source's entity is the deployment, and redgreen keeps no copy of its own. |
 | `sw_issue` | record, kept 90 days after closing | open issues and pull requests on every forge, linked to their repository |
 | `team` | fields only | the same DORA measures over a team's services, through the standard's `sw_service.team` |
 

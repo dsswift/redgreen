@@ -3,6 +3,8 @@ package sync
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"net/http"
 	"time"
 
 	"github.com/dsswift/orrery/sdk"
@@ -20,7 +22,8 @@ const commitReadsPerRepo = 10
 // one before them, with room for a deployment's neighbours.
 const window = 200 * 24 * time.Hour
 
-// argoScope is where the outcomes added to Argo CD syncs are written.
+// argoScope is where the outcomes added to deployments another source owns
+// (Argo CD syncs, and forge jobs a CI job reports itself) are written.
 const argoScope = "argo-outcomes"
 
 // pushOutcomes works out every deployment's outcome and writes it: forge
@@ -58,7 +61,15 @@ func (e *Engine) pushOutcomes(ctx context.Context) {
 	}
 	var incidents []outcomes.Incident
 	argo := map[string]bool{}
+	// By the forge job's address, the entity another source keeps for it.
+	elsewhere := map[string]string{}
 	if e.o.Read != nil {
+		if reports, err := e.o.Read.Reported(ctx, now.Add(-window)); err != nil {
+			e.o.Log.WarnContext(ctx, "deployments other sources report unreadable; forge deployments are written as redgreen's own", "error", err)
+		} else {
+			elsewhere = outcomes.ReportedElsewhere(reports, func(key string) bool { _, ok := forge[key]; return ok })
+			e.o.Log.InfoContext(ctx, "deployments other sources report read", "reports", len(reports), "forgeJobs", len(elsewhere))
+		}
 		syncs, apps, workloads, raw, err := e.o.Read.Read(ctx, now.Add(-window))
 		if err != nil {
 			e.o.Log.ErrorContext(ctx, "orrery read failed; outcomes count forge deployments alone", "error", err)
@@ -89,7 +100,15 @@ func (e *Engine) pushOutcomes(ctx context.Context) {
 		}
 		var x sdk.Entity
 		var scope string
-		if argo[r.Key] {
+		other := ""
+		if d, ok := forge[r.Key]; ok && d.Deployment.URL != "" {
+			other = elsewhere[d.Deployment.URL]
+		}
+		if other != "" {
+			// Another source reports this job: its entity takes the outcome, and redgreen's own copy goes.
+			e.forget(ctx, r.Key, other)
+			x = sdk.Entity{Blueprint: catalog.Deployment, Key: other, Fields: o.Fields(), Relations: map[string]any{"repository": r.RepoKey}}
+		} else if argo[r.Key] {
 			rel := map[string]any{"repository": r.RepoKey}
 			if service != "" {
 				rel["service"] = service
@@ -110,7 +129,7 @@ func (e *Engine) pushOutcomes(ctx context.Context) {
 		if _, changed := e.changed(ctx, x); !changed {
 			continue
 		}
-		if argo[r.Key] {
+		if argo[r.Key] || other != "" {
 			enrich = append(enrich, x)
 		} else {
 			byScope[scope] = append(byScope[scope], x)
@@ -122,6 +141,26 @@ func (e *Engine) pushOutcomes(ctx context.Context) {
 	e.runRemembered(ctx, argoScope, enrich, sdk.EnrichOnly())
 	e.o.Log.InfoContext(ctx, "outcomes written", "deployments", len(records), "argo", len(argo), "incidents", len(incidents), "enriched", len(enrich))
 	span.End()
+}
+
+// forget deletes redgreen's own entity for a forge deployment another source
+// reports, once: only one redgreen wrote is deleted, and what it wrote is
+// forgotten, so the next pass asks nothing.
+func (e *Engine) forget(ctx context.Context, key, other string) {
+	h, err := e.o.Store.Written(ctx, catalog.Deployment, key)
+	if err != nil || h == "" {
+		return
+	}
+	var gone *sdk.APIError
+	if err := e.o.Push.Delete(ctx, catalog.Deployment, key); err != nil && !(errors.As(err, &gone) && gone.Status == http.StatusNotFound) {
+		e.o.Log.WarnContext(ctx, "own copy of a deployment another source reports not deleted; tried again next pass", "deployment", key, "reportedAs", other, "error", err)
+		return
+	}
+	if err := e.o.Store.DeleteWritten(ctx, catalog.Deployment, key); err != nil {
+		e.o.Log.WarnContext(ctx, "deleted deployment not forgotten", "deployment", key, "error", err)
+		return
+	}
+	e.o.Log.InfoContext(ctx, "own copy of a deployment another source reports deleted", "deployment", key, "reportedAs", other)
 }
 
 // runRemembered writes deployments and remembers what took, so an unchanged
