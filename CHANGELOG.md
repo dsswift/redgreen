@@ -55,6 +55,12 @@ All notable changes to this project will be documented in this file. See [standa
 * one language list and open fields ([dafe517](https://github.com/dsswift/redgreen/commit/dafe5174f0f73ab5ec834e686569882f91c35749))
 * push forge deployments to orrery ([185abff](https://github.com/dsswift/redgreen/commit/185abff406076d4b4a343b502ade925caf96625e))
 
+## [1.7.1](https://github.com/dsswift/redgreen/compare/v1.7.0...v1.7.1) (2026-11-16)
+
+### Bug Fixes
+
+* **redgreen:** drop every copy the hub holds of it ([1ec6095](https://github.com/dsswift/redgreen/commit/1ec609573c6740b42c8f8bd3517cd16a332baac0))
+
 ## [1.7.0](https://github.com/dsswift/redgreen/compare/v1.6.0...v1.7.0) (2026-11-16)
 
 ### Features
