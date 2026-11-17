@@ -397,3 +397,19 @@ func TestEachTerraformRootIsItsOwnService(t *testing.T) {
 	// One root keeps the repository's one infrastructure service.
 	same(t, detect(map[string]string{"terraform/versions.tf": backend, "terraform/main.tf": ""}, "az-lz-shop"), []string{"terraform infrastructure Terraform az-lz-shop"})
 }
+
+func TestWhatOnlyFeedsOrChecksTheServicesIsNoService(t *testing.T) {
+	same(t, detect(map[string]string{
+		"ROPApi.WebApi/ROPApi.WebApi.csproj":             csproj("", "Microsoft.NET.Sdk.Web"),
+		"ROPApi.AspNetShared/ROPApi.AspNetShared.csproj": csproj("<OutputType>Library</OutputType><IsPackable>true</IsPackable>", "Microsoft.NET.Sdk.Web"),
+		"ROPApi.TestConsole/ROPApi.TestConsole.csproj":   csproj("<OutputType>Exe</OutputType>", ""),
+		"Agent.Tester/Agent.Tester.csproj":               csproj("<OutputType>WinExe</OutputType>", ""),
+		"web/package.json":                               js(map[string]any{"name": "web", "scripts": map[string]string{"start": "node server.js"}}),
+		"web/libs/inputmask-3.3.11/package.json":         js(map[string]any{"name": "inputmask", "scripts": map[string]string{"start": "webpack --watch"}}),
+		"web/libs/sortable-1.13.0/package.json":          js(map[string]any{"name": "sortable", "scripts": map[string]string{"start": "webpack"}}),
+		"projects/sdk-testbed/package.json":              js(map[string]any{"name": "sdk-testbed", "dependencies": map[string]string{"@angular/core": "17"}}),
+	}, "rop"), []string{
+		"ROPApi.WebApi backend C# ROPApi.WebApi",
+		"web backend JavaScript web",
+	})
+}

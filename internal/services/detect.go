@@ -16,7 +16,7 @@ import (
 
 // Rules is the version of the rules below. Bump it on any change, so every
 // repository is read again instead of trusting its last answer.
-const Rules = 10
+const Rules = 11
 
 // Service types.
 const (
@@ -66,7 +66,11 @@ func init() {
 	}
 }
 
-var testProject = regexp.MustCompile(`(?i)(^|[.\-_])(unit|integration|functional|acceptance|e2e)?tests?$`)
+// testProject names a project, or the folder of one, that only checks the others: tests, a tester, a test bed, a test console.
+var testProject = regexp.MustCompile(`(?i)(^|[.\-_])((unit|integration|functional|acceptance|e2e)?tests?|tester|testbed|testconsole|testharness)$`)
+
+// vendoredCopy names a folder that holds a copy of someone else's package at one version, such as libs/inputmask-3.3.11.
+var vendoredCopy = regexp.MustCompile(`(?i)^[a-z][\w.\-]*?[-_]v?\d+(\.\d+){1,3}$`)
 
 // markers are the kinds of build file, strongest first: where two claim one folder, the first wins.
 var markers = []string{"dotnet", "go", "rust", "swift", "python", "node", "functions", "docker"}
@@ -98,11 +102,12 @@ func join(dir, name string) string {
 var hiddenDir = regexp.MustCompile(`^[._]`)
 
 // skipped says whether a path sits in a folder named for tests, samples, or
-// output, or one a leading `.` or `_` marks as tooling or parked.
+// output, one a leading `.` or `_` marks as tooling or parked, or one that
+// holds a versioned copy of another package.
 func skipped(p string) bool {
 	parts := strings.Split(p, "/")
 	for _, part := range parts[:len(parts)-1] {
-		if skippedDirs[strings.ToLower(part)] || testProject.MatchString(part) || hiddenDir.MatchString(part) {
+		if skippedDirs[strings.ToLower(part)] || testProject.MatchString(part) || hiddenDir.MatchString(part) || vendoredCopy.MatchString(part) {
 			return true
 		}
 	}
@@ -156,6 +161,7 @@ var (
 	reWebForms     = regexp.MustCompile(`(?i)349c5851-65df-11da-9384-00065b846f21`)
 	reWorker       = regexp.MustCompile(`(?i)Sdk="Microsoft\.NET\.Sdk\.Worker"`)
 	reExe          = regexp.MustCompile(`(?i)<OutputType>\s*(Win)?Exe\s*<`)
+	reLibraryOut   = regexp.MustCompile(`(?i)<OutputType>\s*Library\s*<`)
 	reGoCmd        = regexp.MustCompile(`(^|/)cmd/[^/]+/[^/]+\.go$`)
 	reGoMain       = regexp.MustCompile(`(?m)^package main\b`)
 	reGoFunc       = regexp.MustCompile(`\bfunc main\(`)
@@ -215,7 +221,8 @@ func find(paths []string, read Reader, repoName string) []Service {
 	var libraries []libraryMark
 	add := func(f found) { all = append(all, f) }
 
-	// .NET: a project is an app when it is a web app, a Functions app, a worker, or an exe.
+	// .NET: a project is an app when it is a web app, a Functions app, a worker, or an exe. One that says it builds a library is
+	// one, whatever its SDK: a shared ASP.NET project takes the web SDK for its references and runs nothing.
 	for _, file := range files {
 		if !reDotnetProj.MatchString(file) {
 			continue
@@ -246,6 +253,7 @@ func find(paths []string, read Reader, repoName string) []Service {
 		}
 		typ := ""
 		switch {
+		case reLibraryOut.MatchString(xml):
 		case reFunctionsVer.MatchString(xml):
 			typ = Backend
 		case reBlazor.MatchString(xml):
