@@ -408,7 +408,10 @@ func TestWhatOnlyFeedsOrChecksTheServicesIsNoService(t *testing.T) {
 		"web/libs/inputmask-3.3.11/package.json":         js(map[string]any{"name": "inputmask", "scripts": map[string]string{"start": "webpack --watch"}}),
 		"web/libs/sortable-1.13.0/package.json":          js(map[string]any{"name": "sortable", "scripts": map[string]string{"start": "webpack"}}),
 		"projects/sdk-testbed/package.json":              js(map[string]any{"name": "sdk-testbed", "dependencies": map[string]string{"@angular/core": "17"}}),
+		"Classic/Classic.csproj":                         `<Project ToolsVersion="15.0"><PropertyGroup><ProjectTypeGuids>{349c5851-65df-11da-9384-00065b846f21};{fae04ec0-301f-11d3-bf4b-00c04f79efbc}</ProjectTypeGuids><OutputType>Library</OutputType></PropertyGroup></Project>`,
+		"Classic/Web.config":                             "",
 	}, "rop"), []string{
+		"Classic frontend C# Classic",
 		"ROPApi.WebApi backend C# ROPApi.WebApi",
 		"web backend JavaScript web",
 	})

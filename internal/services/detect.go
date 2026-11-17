@@ -16,7 +16,7 @@ import (
 
 // Rules is the version of the rules below. Bump it on any change, so every
 // repository is read again instead of trusting its last answer.
-const Rules = 11
+const Rules = 12
 
 // Service types.
 const (
@@ -221,8 +221,9 @@ func find(paths []string, read Reader, repoName string) []Service {
 	var libraries []libraryMark
 	add := func(f found) { all = append(all, f) }
 
-	// .NET: a project is an app when it is a web app, a Functions app, a worker, or an exe. One that says it builds a library is
-	// one, whatever its SDK: a shared ASP.NET project takes the web SDK for its references and runs nothing.
+	// .NET: a project is an app when it is a web app, a Functions app, a worker, or an exe. A web SDK project that says it builds
+	// a library is one: a shared ASP.NET project takes the web SDK for its references and runs nothing. A classic web
+	// application builds a library too, and is an app by its project type and its Web.config.
 	for _, file := range files {
 		if !reDotnetProj.MatchString(file) {
 			continue
@@ -253,11 +254,11 @@ func find(paths []string, read Reader, repoName string) []Service {
 		}
 		typ := ""
 		switch {
-		case reLibraryOut.MatchString(xml):
 		case reFunctionsVer.MatchString(xml):
 			typ = Backend
 		case reBlazor.MatchString(xml):
 			typ = Frontend
+		case reWebSdk.MatchString(xml) && reLibraryOut.MatchString(xml):
 		case reWebSdk.MatchString(xml):
 			typ = Backend
 			if pages {
