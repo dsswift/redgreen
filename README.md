@@ -32,8 +32,10 @@ repository root. redgreen reads the files with the services, at the same
 commit, so an estate lists exactly the services of the repositories it
 reads, and nothing it does not. The key must be the repository's own, or a
 folder in it; a file in a folder names a service at or under that folder. The place (`fields` and `relations`) is the estate's own
-words: it goes as a patch of its own, so a hub that lacks one of them keeps
-the service without its place. A file that cannot be used is logged and left
+words: it travels on the service in every write, push and sweep alike,
+because each write replaces what redgreen wrote before. Where the hub lacks
+one of its names, the service is written again without its place and stands
+without it. A file that cannot be used is logged and left
 out; the services still stand.
 
 ### Health

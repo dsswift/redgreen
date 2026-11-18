@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"maps"
 	"strings"
 	gosync "sync"
 	"time"
@@ -62,13 +64,14 @@ func accountScope(a provider.Account) string {
 	return strings.ToLower(string(a.Provider) + "/" + a.Login)
 }
 
-// written is what one repository writes, by blueprint.
+// written is what one repository writes, by blueprint. bare is each placed
+// service without its place, by key, written where the hub refuses the place.
 type written struct {
 	repository sdk.Entity
 	pipelines  []sdk.Entity
 	services   []sdk.Entity
+	bare       map[string]sdk.Entity
 	apis       []sdk.Entity
-	placements []sdk.Entity
 	issues     []sdk.Entity
 }
 
@@ -91,9 +94,8 @@ func (e *Engine) entities(ctx context.Context, key string, now time.Time) (writt
 		out.pipelines = append(out.pipelines, catalog.PipelineEntity(r, p, h))
 	}
 	if t.found != nil {
-		out.services = catalog.ServiceEntities(r, t.found, e.logos(ctx, r, t.found))
+		out.services, out.bare = catalog.ServiceEntities(r, t.found, e.logos(ctx, r, t.found))
 		out.apis = catalog.APIEntities(r, t.found)
-		out.placements = catalog.Placements(t.found)
 	}
 	out.issues = e.issues(ctx, key, r, now)
 	return out, true
@@ -123,25 +125,6 @@ func (e *Engine) logos(ctx context.Context, r *provider.Repo, found *services.Fo
 		held[icon.Name] = icon.Name
 	}
 	return held
-}
-
-// place writes a described service's place in the estate's own scheme as a
-// patch of its own, when it changed since the last write. The names in it
-// are the estate's, so a hub without one refuses this patch alone, and the
-// service stands without its place.
-func (e *Engine) place(ctx context.Context, r *provider.Repo, p sdk.Entity) {
-	b, _ := json.Marshal(p)
-	sum := sha256.Sum256(b)
-	h := hex.EncodeToString(sum[:])
-	if had, err := e.o.Store.Written(ctx, "placement", p.Key); err == nil && had == h {
-		return
-	}
-	if err := e.o.Push.Patch(ctx, p); err != nil {
-		e.o.Log.WarnContext(ctx, "orrery refused a service's place; it stands without it", "repo", r.FullName, "service", p.Key, "error", err)
-		return
-	}
-	_ = e.o.Store.PutWritten(ctx, "placement", p.Key, h)
-	e.o.Log.InfoContext(ctx, "orrery service placed", "repo", r.FullName, "service", p.Key, "fields", len(p.Fields), "relations", len(p.Relations))
 }
 
 // issues are a repository's open issues and pull requests, and the ones that
@@ -180,34 +163,64 @@ func (e *Engine) issues(ctx context.Context, key string, r *provider.Repo, now t
 	return open
 }
 
-// run writes entities in one run and counts the outcome.
-func (e *Engine) run(ctx context.Context, mode sdk.RunMode, scope, blueprint string, entities []sdk.Entity, opts ...sdk.RunOption) {
+// run writes entities in one run and counts the outcome. Each entity the hub
+// refuses that bare holds by key is written again in the same run as bare
+// holds it, so a snapshot still counts it seen.
+func (e *Engine) run(ctx context.Context, mode sdk.RunMode, scope, blueprint string, entities []sdk.Entity, bare map[string]sdk.Entity) {
 	if len(entities) == 0 && mode == sdk.Incremental {
 		return
 	}
-	res, err := func() (*sdk.RunResult, error) {
-		add := func(add func(sdk.Entity) error) error {
-			for _, x := range entities {
-				if err := add(x); err != nil {
-					return err
-				}
-			}
-			return nil
-		}
-		if mode == sdk.Snapshot {
-			return e.o.Push.Snapshot(ctx, scope, add, opts...)
-		}
-		return e.o.Push.Incremental(ctx, scope, add, opts...)
-	}()
+	res, unplaced, err := e.write(ctx, mode, scope, entities, bare)
 	if err != nil {
 		e.o.Tel.Pushed(ctx, blueprint, "failed", len(entities))
 		e.o.Log.ErrorContext(ctx, "orrery push failed", "blueprint", blueprint, "scope", scope, "mode", mode, "entities", len(entities), "error", err)
 		return
 	}
-	e.o.Tel.Pushed(ctx, blueprint, "rejected", res.Counts.Rejected)
-	e.o.Tel.Pushed(ctx, blueprint, "accepted", len(entities)-res.Counts.Rejected)
+	rejected := max(res.Counts.Rejected-unplaced, 0)
+	e.o.Tel.Pushed(ctx, blueprint, "rejected", rejected)
+	e.o.Tel.Pushed(ctx, blueprint, "accepted", len(entities)-rejected)
 	e.o.Log.InfoContext(ctx, "orrery push done", "blueprint", blueprint, "scope", scope, "mode", mode, "entities", len(entities),
-		"created", res.Counts.Created, "updated", res.Counts.Updated, "rejected", res.Counts.Rejected, "deleted", res.Counts.Deleted, "massDrop", res.MassDrop)
+		"created", res.Counts.Created, "updated", res.Counts.Updated, "rejected", rejected, "deleted", res.Counts.Deleted, "massDrop", res.MassDrop,
+		"placed", len(bare)-unplaced, "unplaced", unplaced)
+}
+
+// write sends entities in one run and commits it, failing the run on any
+// error so nothing is deleted. unplaced counts the entities written again
+// as bare holds them.
+func (e *Engine) write(ctx context.Context, mode sdk.RunMode, scope string, entities []sdk.Entity, bare map[string]sdk.Entity) (res *sdk.RunResult, unplaced int, err error) {
+	run, err := e.o.Push.OpenRun(ctx, mode, scope)
+	if err != nil {
+		return nil, 0, err
+	}
+	fail := func(err error) (*sdk.RunResult, int, error) {
+		_ = run.Fail(ctx, err.Error())
+		return nil, 0, fmt.Errorf("%s run of %s failed: %w", mode, scope, err)
+	}
+	for _, x := range entities {
+		if err := run.Add(ctx, x); err != nil {
+			return fail(err)
+		}
+	}
+	if len(bare) > 0 {
+		if err := run.Flush(ctx); err != nil {
+			return fail(err)
+		}
+		again := map[string]bool{}
+		for _, w := range run.Rejected() {
+			b, ok := bare[w.Key]
+			if !ok || again[w.Key] {
+				continue
+			}
+			again[w.Key] = true
+			e.o.Log.WarnContext(ctx, "orrery refused a service's place; it stands without it", "service", w.Key, "field", w.Field, "reason", w.Reason)
+			if err := run.Add(ctx, b); err != nil {
+				return fail(err)
+			}
+		}
+		unplaced = len(again)
+	}
+	res, err = run.Commit(ctx)
+	return res, unplaced, err
 }
 
 // pushRepo writes one repository right after a webhook read it, without
@@ -224,22 +237,19 @@ func (e *Engine) pushRepo(ctx context.Context, key string) {
 	}
 	scope := accountScope(t.account)
 	if allowed(catalog.Repository) {
-		e.run(ctx, sdk.Incremental, scope, catalog.Repository, []sdk.Entity{w.repository})
+		e.run(ctx, sdk.Incremental, scope, catalog.Repository, []sdk.Entity{w.repository}, nil)
 	}
 	if allowed(catalog.Pipeline) {
-		e.run(ctx, sdk.Incremental, scope+"/pipelines", catalog.Pipeline, w.pipelines)
+		e.run(ctx, sdk.Incremental, scope+"/pipelines", catalog.Pipeline, w.pipelines, nil)
 	}
 	if allowed(catalog.Service) {
-		e.run(ctx, sdk.Incremental, scope+"/services", catalog.Service, w.services)
-		for _, p := range w.placements {
-			e.place(ctx, t.repo, p)
-		}
+		e.run(ctx, sdk.Incremental, scope+"/services", catalog.Service, w.services, w.bare)
 	}
 	if allowed(catalog.API) {
-		e.run(ctx, sdk.Incremental, scope+"/apis", catalog.API, w.apis)
+		e.run(ctx, sdk.Incremental, scope+"/apis", catalog.API, w.apis, nil)
 	}
 	if allowed(catalog.Issue) {
-		e.run(ctx, sdk.Incremental, scope+"/issues", catalog.Issue, w.issues)
+		e.run(ctx, sdk.Incremental, scope+"/issues", catalog.Issue, w.issues, nil)
 	}
 }
 
@@ -254,7 +264,7 @@ func (e *Engine) pushAccount(ctx context.Context, a provider.Account, keys []str
 	}
 	now := time.Now()
 	var repos, pipelines, svcs, apis, issues []sdk.Entity
-	var placed []placement
+	bare := map[string]sdk.Entity{}
 	clean, servicesRead := true, true
 	for _, k := range keys {
 		t := e.get(k)
@@ -272,10 +282,8 @@ func (e *Engine) pushAccount(ctx context.Context, a provider.Account, keys []str
 		repos = append(repos, w.repository)
 		pipelines = append(pipelines, w.pipelines...)
 		svcs = append(svcs, w.services...)
+		maps.Copy(bare, w.bare)
 		apis = append(apis, w.apis...)
-		for _, p := range w.placements {
-			placed = append(placed, placement{repo: e.get(k).repo, entity: p})
-		}
 		issues = append(issues, w.issues...)
 	}
 	mode := sdk.Snapshot
@@ -285,33 +293,24 @@ func (e *Engine) pushAccount(ctx context.Context, a provider.Account, keys []str
 	}
 	scope := accountScope(a)
 	if allowed(catalog.Repository) {
-		e.run(ctx, mode, scope, catalog.Repository, repos)
+		e.run(ctx, mode, scope, catalog.Repository, repos, nil)
 	}
 	if allowed(catalog.Pipeline) {
-		e.run(ctx, mode, scope+"/pipelines", catalog.Pipeline, pipelines)
+		e.run(ctx, mode, scope+"/pipelines", catalog.Pipeline, pipelines, nil)
 	}
 	if allowed(catalog.Service) {
 		serviceMode := mode
 		if !servicesRead {
 			serviceMode = sdk.Incremental
 		}
-		e.run(ctx, serviceMode, scope+"/services", catalog.Service, svcs)
-		for _, p := range placed {
-			e.place(ctx, p.repo, p.entity)
-		}
+		e.run(ctx, serviceMode, scope+"/services", catalog.Service, svcs, bare)
 		if allowed(catalog.API) {
-			e.run(ctx, serviceMode, scope+"/apis", catalog.API, apis)
+			e.run(ctx, serviceMode, scope+"/apis", catalog.API, apis, nil)
 		}
 	}
 	if allowed(catalog.Issue) {
-		e.run(ctx, sdk.Incremental, scope+"/issues", catalog.Issue, issues)
+		e.run(ctx, sdk.Incremental, scope+"/issues", catalog.Issue, issues, nil)
 	}
-}
-
-// placement is one described service's place, with the repository it came from.
-type placement struct {
-	repo   *provider.Repo
-	entity sdk.Entity
 }
 
 // changed says whether an entity differs from what was last written for it.

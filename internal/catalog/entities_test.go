@@ -15,7 +15,7 @@ func TestTheDescribedServiceCarriesItsFile(t *testing.T) {
 		Provides: []services.API{{ID: "V1", Title: "Shop API", Kind: "rest", Spec: "openapi.yaml"}}, Consumes: []string{"github/acme/hub/catalog"}}
 	found := &services.Found{Descriptions: []services.Description{{Descriptor: *d, File: "orrery.yaml"}}, Services: []services.Service{{ID: "cmd/shop", Name: "shop", Language: "Go"}, {ID: "web", Name: "web", Language: "TypeScript"}}}
 
-	svcs := ServiceEntities(repo, found, map[string]string{"shop": "shop"})
+	svcs, bare := ServiceEntities(repo, found, map[string]string{"shop": "shop"})
 	if len(svcs) != 2 {
 		t.Fatalf("services = %+v", svcs)
 	}
@@ -26,13 +26,17 @@ func TestTheDescribedServiceCarriesItsFile(t *testing.T) {
 	if w, ok := shop.Relations["will_consume"].([]string); !ok || len(w) != 0 {
 		t.Errorf("an empty list is written as one, so a removed connector leaves: %v", shop.Relations["will_consume"])
 	}
-	if _, ok := shop.Fields["category"]; ok {
-		t.Error("the estate's own fields go in the placement, never in the snapshot")
+	if shop.Fields["category"] != "Portal" || shop.Relations["pillars"] == nil {
+		t.Errorf("the place travels on the service, so no write drops it: %+v", shop)
+	}
+	b, ok := bare[shop.Key]
+	if !ok || len(bare) != 1 || b.Fields["category"] != nil || b.Relations["pillars"] != nil || b.Fields["origin"] != "built" || b.Icon != "shop" {
+		t.Errorf("bare is the service as read, without its place: %+v", bare)
 	}
 	if web.Icon != "typescript" || web.Relations["consumes"] != nil {
 		t.Errorf("an undescribed service wears its language and no connectors: %+v", web)
 	}
-	if kept := ServiceEntities(repo, found, nil); kept[0].Icon != "" {
+	if kept, _ := ServiceEntities(repo, found, nil); kept[0].Icon != "" {
 		t.Errorf("a logo the hub lacks is left off, so the hub keeps its own: %q", kept[0].Icon)
 	}
 
@@ -40,24 +44,16 @@ func TestTheDescribedServiceCarriesItsFile(t *testing.T) {
 	if len(apis) != 1 || apis[0].Key != "github/acme/shop/cmd/shop/v1" || apis[0].Relations["service"] != d.Service || apis[0].Fields["spec"] != "https://github.com/Acme/Shop/blob/HEAD/openapi.yaml" {
 		t.Errorf("apis = %+v", apis)
 	}
-	ps := Placements(found)
-	if len(ps) != 1 {
-		t.Fatalf("placements = %+v", ps)
-	}
-	p := ps[0]
-	if p.Key != d.Service || p.Fields["category"] != "Portal" || p.Relations["pillars"] == nil || p.Fields["origin"] != nil {
-		t.Errorf("placement = %+v", p)
-	}
 }
 
 func TestADescriptorWithNoBuildFileStillNamesItsService(t *testing.T) {
 	repo := &provider.Repo{Provider: provider.GitHub, FullName: "acme/hub"}
 	found := &services.Found{Descriptions: []services.Description{{Descriptor: services.Descriptor{Service: "github/acme/hub"}}}}
-	svcs := ServiceEntities(repo, found, nil)
+	svcs, bare := ServiceEntities(repo, found, nil)
 	if len(svcs) != 1 || svcs[0].Key != "github/acme/hub" || svcs[0].Title != "hub" || svcs[0].Relations["repository"] != "github/acme/hub" {
 		t.Fatalf("services = %+v", svcs)
 	}
-	if Placements(found) != nil || APIEntities(repo, &services.Found{}) != nil {
+	if len(bare) != 0 || APIEntities(repo, &services.Found{}) != nil {
 		t.Error("nothing to place or offer writes nothing")
 	}
 }

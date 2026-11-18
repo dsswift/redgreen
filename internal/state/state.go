@@ -68,6 +68,8 @@ CREATE TABLE IF NOT EXISTS written (
   hash TEXT NOT NULL,
   PRIMARY KEY (blueprint, key)
 );
+-- A service's place travels on the service, so no hash of it is kept.
+DELETE FROM written WHERE blueprint = 'placement';
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL

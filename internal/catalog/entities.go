@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"maps"
 	"strconv"
 	"strings"
 	"time"
@@ -133,12 +134,18 @@ var languageIcons = map[string]string{
 
 // ServiceEntities are the services found in a repository. One an
 // orrery.yaml describes wears the logo it names (icons maps a logo's name to
-// itself once the hub holds it; a name missing keeps the hub's) and the APIs
-// it calls, and is written even where no build file was found for it. The
-// rest wear their language.
-func ServiceEntities(r *provider.Repo, found *services.Found, icons map[string]string) []sdk.Entity {
+// itself once the hub holds it; a name missing keeps the hub's), the APIs it
+// calls, and its place in the estate's scheme, and is written even where no
+// build file was found for it. The rest wear their language.
+//
+// A run replaces every field its source wrote before, so the place travels
+// on the service in every write. bare holds, by key, each placed service
+// without its place: the names in a place are the estate's, and where the
+// hub lacks one, the service is written as bare holds it and stands without
+// its place.
+func ServiceEntities(r *provider.Repo, found *services.Found, icons map[string]string) (out []sdk.Entity, bare map[string]sdk.Entity) {
 	repo := RepoKey(r.Provider, r.FullName)
-	var out []sdk.Entity
+	bare = map[string]sdk.Entity{}
 	described := map[string]bool{}
 	for _, s := range found.Services {
 		key := ServiceKey(repo, s.ID)
@@ -149,7 +156,7 @@ func ServiceEntities(r *provider.Repo, found *services.Found, icons map[string]s
 			"has_readme": s.Files.Readme, "has_dockerfile": s.Files.Dockerfile, "has_tests": s.Files.Tests,
 		}}
 		if d := found.Describing(key); d != nil {
-			describe(&e, d, icons)
+			describe(&e, d, icons, bare)
 			described[key] = true
 		}
 		out = append(out, e)
@@ -160,21 +167,31 @@ func ServiceEntities(r *provider.Repo, found *services.Found, icons map[string]s
 			continue
 		}
 		e := sdk.Entity{Blueprint: Service, Key: d.Service, Title: d.Service[strings.LastIndex(d.Service, "/")+1:], Relations: map[string]any{"repository": repo}, Fields: map[string]any{"origin": "built"}}
-		describe(&e, d, icons)
+		describe(&e, d, icons, bare)
 		out = append(out, e)
 	}
-	return out
+	return out, bare
 }
 
-// describe puts what an orrery.yaml says on its service: its logo and the
-// APIs it calls. An empty list is written as one, so a connector removed
-// from the file leaves the catalog.
-func describe(e *sdk.Entity, d *services.Description, icons map[string]string) {
+// describe puts what an orrery.yaml says on its service: its logo, the APIs
+// it calls, and its place. An empty list is written as one, so a connector
+// removed from the file leaves the catalog. A name the place shares with
+// what redgreen reads takes the file's value. A service given a place is
+// kept in bare as it stood before.
+func describe(e *sdk.Entity, d *services.Description, icons map[string]string, bare map[string]sdk.Entity) {
 	if d.Icon != nil {
 		e.Icon = icons[d.Icon.Name]
 	}
 	e.Relations["consumes"] = nonNil(d.Consumes)
 	e.Relations["will_consume"] = nonNil(d.WillConsume)
+	if len(d.Fields)+len(d.Relations) == 0 {
+		return
+	}
+	b := *e
+	b.Fields, b.Relations = maps.Clone(e.Fields), maps.Clone(e.Relations)
+	bare[e.Key] = b
+	maps.Copy(e.Fields, d.Fields)
+	maps.Copy(e.Relations, d.Relations)
 }
 
 // APIEntities are the APIs a repository's orrery.yaml files say their services offer.
@@ -186,19 +203,6 @@ func APIEntities(r *provider.Repo, found *services.Found) []sdk.Entity {
 				Fields: map[string]any{"kind": a.Kind, "description": orNil(a.Description), "visibility": "internal", "external": false,
 					"spec": services.SpecURL(a.Spec, r.URL, string(r.Provider))},
 				Relations: map[string]any{"service": d.Service}})
-		}
-	}
-	return out
-}
-
-// Placements are each described service's place in the estate's own
-// scheme: the fields and relations its orrery.yaml names, which redgreen
-// does not define. A file that names none places nothing.
-func Placements(found *services.Found) []sdk.Entity {
-	var out []sdk.Entity
-	for _, d := range found.Descriptions {
-		if len(d.Fields)+len(d.Relations) > 0 {
-			out = append(out, sdk.Entity{Blueprint: Service, Key: d.Service, Fields: d.Fields, Relations: d.Relations})
 		}
 	}
 	return out
