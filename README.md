@@ -20,6 +20,7 @@ that can be rebuilt by one sweep.
 | `sw_api` | inventory | each API a repository's `orrery.yaml` says its service provides: kind, description, and where its definition is read |
 | `sw_deployment` | history, kept 180 days | each deployment a forge recorded, with lead time, commits carried, fix only, failed change, and restore time. Argo CD syncs another source writes get the same fields added, and so does a forge job another source already reports by its address: that source's entity is the deployment, and redgreen keeps no copy of its own. |
 | `sw_issue` | record, kept 90 days after closing | open issues and pull requests on every forge, linked to their repository |
+| `sw_connection` | inventory | each host a service's config files name, per environment: host, resource name, database, kind, and the setting names, with evidence `code`. Names only, never a value. |
 | `team` | fields only | the same DORA measures over a team's services, through the standard's `sw_service.team` |
 
 ### What a repository says about itself
@@ -37,6 +38,29 @@ because each write replaces what redgreen wrote before. Where the hub lacks
 one of its names, the service is written again without its place and stands
 without it. A file that cannot be used is logged and left
 out; the services still stand.
+
+### What a service's config files say it reaches
+
+redgreen reads the config files in each service's own folder, at the same
+commit as the services: `appsettings*.json`, `local.settings.json`,
+`web*.config` with its transforms (`Web.Prod.config`),
+`ApplicationInsights.config`, and `*.env.example`. It reads connection
+strings, URLs, Key Vault references, Redis configuration strings, and Azure
+host names, and keeps the host, the database, and the names of the settings
+that named them. Every value, password, and key is dropped while the file
+is read. An App Insights instrumentation key is kept, as `app_insights_key`
+on a connection of kind `appinsights`: it is an identifier, not a secret.
+
+The environment is the word in the file name: Production or Prod, Staging,
+Test, Dev, Preprod, Uat, or Qa, written as `Prod`, `Staging`, `Test`, `Dev`,
+`Preprod`, `Uat`, or `Qa`. A file that names none, such as `appsettings.json`
+or `Web.config`, is `unknown`. Each record is keyed
+`<service key>@<environment>><host>[/<database>]@code` and linked to its
+service; the estate's hub links the environment, the app, and the resource
+by its own rules. redgreen offers `sw_connection` with only the fields it
+writes, each as an estate defines it, so a hub that already has the
+blueprint gains nothing from the offer. A config file that cannot be parsed
+is logged and left out.
 
 ### Health
 

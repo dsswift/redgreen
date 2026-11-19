@@ -208,6 +208,52 @@ func APIEntities(r *provider.Repo, found *services.Found) []sdk.Entity {
 	return out
 }
 
+// ConnectionKey is a connection's key from code: the service and
+// environment, the host (or an App Insights key in its place) and database,
+// and the evidence.
+func ConnectionKey(service string, c services.Connection) string {
+	to := c.Host
+	if c.Kind == services.AppInsights {
+		to = c.AppInsightsKey
+	}
+	if c.Database != "" {
+		to += "/" + strings.ToLower(c.Database)
+	}
+	return service + "@" + c.Environment + ">" + to + "@code"
+}
+
+// ConnectionEntities are the hosts a repository's services' config files name.
+func ConnectionEntities(r *provider.Repo, found *services.Found) []sdk.Entity {
+	repo := RepoKey(r.Provider, r.FullName)
+	names := map[string]string{}
+	for _, s := range found.Services {
+		names[s.ID] = s.Name
+	}
+	var out []sdk.Entity
+	for _, c := range found.Connections {
+		service := ServiceKey(repo, c.Service)
+		to := c.Host
+		if c.Kind == services.AppInsights {
+			to = "App Insights " + c.AppInsightsKey
+		}
+		if c.Database != "" {
+			to += "/" + c.Database
+		}
+		out = append(out, sdk.Entity{Blueprint: Connection, Key: ConnectionKey(service, c), Title: names[c.Service] + " (" + c.Environment + ") to " + to,
+			Fields: map[string]any{"host": orNil(c.Host), "resource_name": orNil(resourceName(c.Host)), "database": orNil(c.Database), "kind": c.Kind, "evidence": "code",
+				"environment_name": c.Environment, "setting_names": nonNil(c.Settings), "app_insights_key": orNil(c.AppInsightsKey)},
+			Relations: map[string]any{"service": service}})
+	}
+	return out
+}
+
+// resourceName is a host's first label: on Azure's shared domains, the
+// account or server it names.
+func resourceName(host string) string {
+	name, _, _ := strings.Cut(host, ".")
+	return name
+}
+
 // DeploymentService is the service a repository-wide deployment rolled out:
 // the one at the root, or the repository's only one. "" when neither.
 func DeploymentService(repoKey string, found *services.Found, folder string) string {

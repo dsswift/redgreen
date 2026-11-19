@@ -18,7 +18,9 @@ type Found struct {
 	Rules        int           `json:"rules"`
 	Services     []Service     `json:"services"`
 	Descriptions []Description `json:"descriptions,omitempty"`
-	// Problems say why an orrery.yaml, or the logo it names, cannot be used.
+	// Connections are the hosts the services' config files name.
+	Connections []Connection `json:"connections,omitempty"`
+	// Problems say why an orrery.yaml, the logo it names, or a config file cannot be used in full.
 	Problems []string `json:"problems,omitempty"`
 }
 
@@ -47,8 +49,8 @@ type Outcome struct {
 	Read int
 }
 
-// Read finds the services at the head of a repository's default branch, and
-// reads its orrery.yaml. The last answer stands while the branch has not
+// Read finds the services at the head of a repository's default branch,
+// reads its orrery.yaml, and reads the hosts each service's config files name. The last answer stands while the branch has not
 // moved and the rules have not changed, so a quiet repository costs one look
 // at its head.
 func Read(ctx context.Context, files Files, repoKey, repoName string, previous *Found, bots Bots) (*Found, Outcome, error) {
@@ -65,6 +67,7 @@ func Read(ctx context.Context, files Files, repoKey, repoName string, previous *
 	reader := &budgeted{ctx: ctx, files: files, budget: ReadBudget}
 	out := &Found{Commit: files.Commit(), Rules: Rules}
 	out.Services = Detect(paths, reader.read, repoName)
+	out.connect(paths, reader.read)
 	if reader.err != nil {
 		return nil, Outcome{}, reader.err
 	}

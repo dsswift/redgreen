@@ -99,6 +99,7 @@ const (
 	API        = "sw_api"
 	Deployment = "sw_deployment"
 	Issue      = "sw_issue"
+	Connection = "sw_connection"
 	Team       = "team"
 )
 
@@ -341,6 +342,32 @@ func APIBlueprint() sdk.Blueprint {
 	}
 }
 
+// ConnectionBlueprint is one running thing reaching one host, as one source
+// saw it. redgreen writes the ones a service's config files name (evidence
+// code), keyed <service key>@<environment>><host>[/<database>]@code. It
+// offers only what it writes, each exactly as an estate defines it: the
+// links from a host to the resource it reaches, and from an environment's
+// name to the environment and the app, are the estate's own rules and read
+// blueprints an estate may not have.
+func ConnectionBlueprint() sdk.Blueprint {
+	return sdk.Blueprint{
+		"id": Connection, "title": "Connection", "group": "Operations", "icon": "azure_connections",
+		"description": "Inventory: one running thing reaching one host, as one source saw it (an app setting, a call in telemetry, a config file in a repository or on the app, a managed identity grant, or a vault secret). It holds host names and database names only, never a value. Orrery links the host to the resource by rule. Kept while a source still sees it.",
+		"fields": Fields{
+			f("host", typed("string", "title", "Host", "description", "The host name the source saw, lower case, no scheme, port, or path.")),
+			f("database", typed("string", "title", "Database", "description", "The database name, when the source named one.")),
+			f("kind", typed("enum", "title", "Kind", "values", services.ConnectionKinds, "chip", true)),
+			f("evidence", typed("enum", "title", "Found in", "values", []string{"setting", "telemetry", "code", "deployed", "identity", "vault"}, "chip", true,
+				"description", "setting: the app's settings or connection strings. telemetry: calls in Application Insights. code: a config file in the repository. deployed: a config file on the running app. identity: a managed identity's data role on the resource. vault: a Key Vault secret.")),
+			f("setting_names", typed("array", "title", "Setting names", "description", "Names of the settings or config keys that named this host. Never their values.")),
+			f("environment_name", typed("string", "title", "Environment", "description", "The environment the source says this is for, when it is not the app's own.")),
+			f("resource_name", typed("string", "title", "Resource name", "description", "The first label of the host, which names the account or server on Azure shared domains (the storage account in acct.blob.core.windows.net).")),
+			f("app_insights_key", typed("string", "title", "Application Insights key", "description", "For kind appinsights: the instrumentation key the config names. Microsoft does not treat it as a secret.")),
+		},
+		"relations": map[string]any{"service": map[string]any{"target": Service, "many": false, "title": "From service", "inverseTitle": "Connections in code"}},
+	}
+}
+
 // TeamDORA is the DORA measures of a team, over its services' deployments. It is offered on its own,
 // after the rest: it reads the standard's sw_service.team, which an estate may not have.
 func TeamDORA() sdk.Blueprint {
@@ -406,5 +433,5 @@ func IssueBlueprint() sdk.Blueprint {
 
 // Blueprints are offered in this order; the hub accepts relations in any order.
 func Blueprints() []sdk.Blueprint {
-	return []sdk.Blueprint{RepositoryBlueprint(), PipelineBlueprint(), ServiceBlueprint(), APIBlueprint(), DeploymentBlueprint(), IssueBlueprint(), TeamDORA()}
+	return []sdk.Blueprint{RepositoryBlueprint(), PipelineBlueprint(), ServiceBlueprint(), APIBlueprint(), DeploymentBlueprint(), IssueBlueprint(), ConnectionBlueprint(), TeamDORA()}
 }

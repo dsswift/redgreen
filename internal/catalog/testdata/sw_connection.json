@@ -1,0 +1,271 @@
+{
+  "id": "sw_connection",
+  "title": "Connection",
+  "description": "Inventory: one running thing reaching one host, as one source saw it (an app setting, a call in telemetry, a config file in a repository or on the app, a managed identity grant, or a vault secret). It holds host names and database names only, never a value. Orrery links the host to the resource by rule. Kept while a source still sees it.",
+  "icon": "azure_connections",
+  "group": "Operations",
+  "status": {
+    "field": "health"
+  },
+  "fields": {
+    "host": {
+      "type": "string",
+      "title": "Host",
+      "description": "The host name the source saw, lower case, no scheme, port, or path."
+    },
+    "database": {
+      "type": "string",
+      "title": "Database",
+      "description": "The database name, when the source named one."
+    },
+    "kind": {
+      "type": "enum",
+      "title": "Kind",
+      "values": [
+        "sql",
+        "cosmos",
+        "postgres",
+        "mysql",
+        "storage",
+        "servicebus",
+        "eventhub",
+        "redis",
+        "http",
+        "keyvault",
+        "appconfig",
+        "search",
+        "appinsights"
+      ],
+      "chip": true
+    },
+    "evidence": {
+      "type": "enum",
+      "title": "Found in",
+      "description": "setting: the app's settings or connection strings. telemetry: calls in Application Insights. code: a config file in the repository. deployed: a config file on the running app. identity: a managed identity's data role on the resource. vault: a Key Vault secret.",
+      "values": [
+        "setting",
+        "telemetry",
+        "code",
+        "deployed",
+        "identity",
+        "vault"
+      ],
+      "chip": true
+    },
+    "setting_names": {
+      "type": "array",
+      "title": "Setting names",
+      "description": "Names of the settings or config keys that named this host. Never their values."
+    },
+    "environment_name": {
+      "type": "string",
+      "title": "Environment",
+      "description": "The environment the source says this is for, when it is not the app's own."
+    },
+    "vault": {
+      "type": "string",
+      "title": "Vault",
+      "description": "For a Key Vault reference: the vault's name."
+    },
+    "secret": {
+      "type": "string",
+      "title": "Secret",
+      "description": "For a Key Vault reference: the secret's name. Never its value."
+    },
+    "calls_7d": {
+      "type": "number",
+      "title": "Calls, 7 days"
+    },
+    "failed_7d": {
+      "type": "number",
+      "title": "Failed calls, 7 days"
+    },
+    "last_call_at": {
+      "type": "datetime",
+      "title": "Last call"
+    },
+    "n_to_database_server": {
+      "type": "number",
+      "title": "Matched database server",
+      "aggregation": {
+        "relation": "to_database_server",
+        "fn": "count"
+      }
+    },
+    "n_to_database": {
+      "type": "number",
+      "title": "Matched database",
+      "aggregation": {
+        "relation": "to_database",
+        "fn": "count"
+      }
+    },
+    "n_to_storage": {
+      "type": "number",
+      "title": "Matched storage",
+      "aggregation": {
+        "relation": "to_storage",
+        "fn": "count"
+      }
+    },
+    "n_to_messaging": {
+      "type": "number",
+      "title": "Matched messaging",
+      "aggregation": {
+        "relation": "to_messaging",
+        "fn": "count"
+      }
+    },
+    "n_to_config_store": {
+      "type": "number",
+      "title": "Matched config store",
+      "aggregation": {
+        "relation": "to_config_store",
+        "fn": "count"
+      }
+    },
+    "n_to_app": {
+      "type": "number",
+      "title": "Matched app",
+      "aggregation": {
+        "relation": "to_app",
+        "fn": "count"
+      }
+    },
+    "n_to_monitoring": {
+      "type": "number",
+      "title": "Matched monitoring",
+      "aggregation": {
+        "relation": "to_monitoring",
+        "fn": "count"
+      }
+    },
+    "matched": {
+      "type": "number",
+      "title": "Resources matched",
+      "description": "How many resources the host was linked to.",
+      "calculation": "n_to_database_server + n_to_database + n_to_storage + n_to_messaging + n_to_config_store + n_to_app + n_to_monitoring"
+    },
+    "health": {
+      "type": "enum",
+      "title": "Health",
+      "values": [
+        "red",
+        "amber",
+        "green",
+        "grey"
+      ],
+      "calculation": "matched > 0 ? 'green' : (kind == 'http' || kind == 'appinsights' ? 'grey' : 'amber')"
+    },
+    "resource_name": {
+      "type": "string",
+      "title": "Resource name",
+      "description": "The first label of the host, which names the account or server on Azure shared domains (the storage account in acct.blob.core.windows.net)."
+    },
+    "app_insights_key": {
+      "type": "string",
+      "title": "Application Insights key",
+      "description": "For kind appinsights: the instrumentation key the config names. Microsoft does not treat it as a secret."
+    },
+    "service_key": {
+      "type": "string",
+      "title": "Service key",
+      "mirror": "service.key"
+    },
+    "environment_key": {
+      "type": "string",
+      "title": "Environment key",
+      "mirror": "environment.key"
+    },
+    "match_endpoint": {
+      "type": "string",
+      "title": "Match key",
+      "description": "The endpoint form of the host, as the resource it reaches records it.",
+      "calculation": "kind == \"storage\" ? \"https://\" + resource_name + \".blob.core.windows.net/\" : (kind == \"cosmos\" || kind == \"servicebus\" || kind == \"eventhub\" ? \"https://\" + host + \":443/\" : (kind == \"keyvault\" || kind == \"appconfig\" ? \"https://\" + host + \"/\" : host))"
+    },
+    "match_database": {
+      "type": "string",
+      "title": "Database match key",
+      "calculation": "empty(database) ? null : (kind == \"cosmos\" ? \"https://\" + host + \":443/\" : host) + \"|\" + lower(database)"
+    },
+    "match_service_env": {
+      "type": "string",
+      "title": "Service match key",
+      "calculation": "evidence == \"code\" && !empty(service_key) && !empty(environment_key) ? service_key + \"@\" + environment_key : null"
+    }
+  },
+  "relations": {
+    "app": {
+      "target": "azure_app_service",
+      "many": false,
+      "title": "From app",
+      "inverseTitle": "Connections"
+    },
+    "gateway": {
+      "target": "azure_gateway",
+      "many": false,
+      "title": "From gateway",
+      "inverseTitle": "Routes"
+    },
+    "service": {
+      "target": "sw_service",
+      "many": false,
+      "title": "From service",
+      "inverseTitle": "Connections in code"
+    },
+    "from_vault": {
+      "target": "azure_config_store",
+      "many": false,
+      "title": "From vault",
+      "inverseTitle": "Secrets pointing at"
+    },
+    "to_database_server": {
+      "target": "azure_database_server",
+      "many": false,
+      "title": "To database server",
+      "inverseTitle": "Connected from"
+    },
+    "to_database": {
+      "target": "azure_database",
+      "many": false,
+      "title": "To database",
+      "inverseTitle": "Connected from"
+    },
+    "to_storage": {
+      "target": "azure_storage",
+      "many": false,
+      "title": "To storage",
+      "inverseTitle": "Connected from"
+    },
+    "to_messaging": {
+      "target": "azure_messaging",
+      "many": false,
+      "title": "To messaging",
+      "inverseTitle": "Connected from"
+    },
+    "to_config_store": {
+      "target": "azure_config_store",
+      "many": false,
+      "title": "To vault or config",
+      "inverseTitle": "Connected from"
+    },
+    "to_app": {
+      "target": "azure_app_service",
+      "many": false,
+      "title": "To app",
+      "inverseTitle": "Called by"
+    },
+    "to_monitoring": {
+      "target": "azure_monitoring",
+      "many": false,
+      "title": "To Application Insights",
+      "inverseTitle": "Reported to by"
+    },
+    "environment": {
+      "target": "sw_environment",
+      "many": false,
+      "title": "Environment",
+      "inverseTitle": "Connections"
+    }
+  }
+}

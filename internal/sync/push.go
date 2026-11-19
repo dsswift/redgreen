@@ -67,12 +67,13 @@ func accountScope(a provider.Account) string {
 // written is what one repository writes, by blueprint. bare is each placed
 // service without its place, by key, written where the hub refuses the place.
 type written struct {
-	repository sdk.Entity
-	pipelines  []sdk.Entity
-	services   []sdk.Entity
-	bare       map[string]sdk.Entity
-	apis       []sdk.Entity
-	issues     []sdk.Entity
+	repository  sdk.Entity
+	pipelines   []sdk.Entity
+	services    []sdk.Entity
+	bare        map[string]sdk.Entity
+	apis        []sdk.Entity
+	connections []sdk.Entity
+	issues      []sdk.Entity
 }
 
 // entities shapes one repository from its last read. ok is false when it has none.
@@ -96,6 +97,7 @@ func (e *Engine) entities(ctx context.Context, key string, now time.Time) (writt
 	if t.found != nil {
 		out.services, out.bare = catalog.ServiceEntities(r, t.found, e.logos(ctx, r, t.found))
 		out.apis = catalog.APIEntities(r, t.found)
+		out.connections = catalog.ConnectionEntities(r, t.found)
 	}
 	out.issues = e.issues(ctx, key, r, now)
 	return out, true
@@ -248,6 +250,9 @@ func (e *Engine) pushRepo(ctx context.Context, key string) {
 	if allowed(catalog.API) {
 		e.run(ctx, sdk.Incremental, scope+"/apis", catalog.API, w.apis, nil)
 	}
+	if allowed(catalog.Connection) {
+		e.run(ctx, sdk.Incremental, scope+"/connections", catalog.Connection, w.connections, nil)
+	}
 	if allowed(catalog.Issue) {
 		e.run(ctx, sdk.Incremental, scope+"/issues", catalog.Issue, w.issues, nil)
 	}
@@ -263,7 +268,7 @@ func (e *Engine) pushAccount(ctx context.Context, a provider.Account, keys []str
 		return
 	}
 	now := time.Now()
-	var repos, pipelines, svcs, apis, issues []sdk.Entity
+	var repos, pipelines, svcs, apis, connections, issues []sdk.Entity
 	bare := map[string]sdk.Entity{}
 	clean, servicesRead := true, true
 	for _, k := range keys {
@@ -284,6 +289,7 @@ func (e *Engine) pushAccount(ctx context.Context, a provider.Account, keys []str
 		svcs = append(svcs, w.services...)
 		maps.Copy(bare, w.bare)
 		apis = append(apis, w.apis...)
+		connections = append(connections, w.connections...)
 		issues = append(issues, w.issues...)
 	}
 	mode := sdk.Snapshot
@@ -306,6 +312,9 @@ func (e *Engine) pushAccount(ctx context.Context, a provider.Account, keys []str
 		e.run(ctx, serviceMode, scope+"/services", catalog.Service, svcs, bare)
 		if allowed(catalog.API) {
 			e.run(ctx, serviceMode, scope+"/apis", catalog.API, apis, nil)
+		}
+		if allowed(catalog.Connection) {
+			e.run(ctx, serviceMode, scope+"/connections", catalog.Connection, connections, nil)
 		}
 	}
 	if allowed(catalog.Issue) {

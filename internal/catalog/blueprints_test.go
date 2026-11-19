@@ -1,6 +1,9 @@
 package catalog
 
 import (
+	"encoding/json"
+	"os"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -136,6 +139,8 @@ func TestEntitiesWriteOnlyDefinedFields(t *testing.T) {
 	entities = append(entities, svcs...)
 	entities = append(entities, APIEntities(repo, found)...)
 	entities = append(entities, IssueEntities(repo)...)
+	entities = append(entities, ConnectionEntities(repo, &services.Found{Services: found.Services, Connections: []services.Connection{
+		{Service: "", Environment: "Prod", Kind: services.SQL, Host: "db.database.windows.net", Database: "app", Settings: []string{"Db"}}}})...)
 	all := byID()
 	for _, e := range entities {
 		bp := all[e.Blueprint]
@@ -197,6 +202,46 @@ func TestDeliveryTrendsReadKeptMeasures(t *testing.T) {
 		}
 		if trends != 4 {
 			t.Errorf("%d trends, want one per measure", trends)
+		}
+	}
+}
+
+// TestConnectionIsOfferedAsTheEstateDefinesIt checks every field and
+// relation offered on sw_connection is the one an estate's hub holds, word
+// for word, so the offer adds nothing to a hub that has it. The derived
+// fields and the relations to cloud resources are the estate's own and are
+// not offered.
+func TestConnectionIsOfferedAsTheEstateDefinesIt(t *testing.T) {
+	raw, err := os.ReadFile("testdata/sw_connection.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hub struct {
+		Title, Description, Icon, Group string
+		Fields                          map[string]any
+		Relations                       map[string]any
+	}
+	if err := json.Unmarshal(raw, &hub); err != nil {
+		t.Fatal(err)
+	}
+	normal := func(v any) any {
+		b, _ := json.Marshal(v)
+		var out any
+		_ = json.Unmarshal(b, &out)
+		return out
+	}
+	bp := byID()[Connection]
+	if bp["title"] != hub.Title || bp["description"] != hub.Description || bp["icon"] != hub.Icon || bp["group"] != hub.Group {
+		t.Errorf("blueprint = %v %v %v, hub = %v %v %v", bp["title"], bp["icon"], bp["group"], hub.Title, hub.Icon, hub.Group)
+	}
+	for _, fd := range bp["fields"].(Fields) {
+		if !reflect.DeepEqual(normal(fd.Def), hub.Fields[fd.Name]) {
+			t.Errorf("field %s = %v, hub = %v", fd.Name, normal(fd.Def), hub.Fields[fd.Name])
+		}
+	}
+	for name, rel := range bp["relations"].(map[string]any) {
+		if !reflect.DeepEqual(normal(rel), hub.Relations[name]) {
+			t.Errorf("relation %s = %v, hub = %v", name, normal(rel), hub.Relations[name])
 		}
 	}
 }

@@ -326,12 +326,12 @@ func (e *Engine) services(ctx context.Context, p provider.Provider, t *tracked, 
 	if out.Reused {
 		return found
 	}
-	e.o.Log.InfoContext(ctx, "services read", "repo", repo.FullName, "commit", found.Commit, "services", len(found.Services), "filesRead", out.Read)
+	e.o.Log.InfoContext(ctx, "services read", "repo", repo.FullName, "commit", found.Commit, "services", len(found.Services), "connections", len(found.Connections), "filesRead", out.Read)
 	if out.Read > services.ReadBudget {
 		e.o.Log.WarnContext(ctx, "read budget spent; services found so far stand", "repo", repo.FullName, "budget", services.ReadBudget)
 	}
 	for _, problem := range found.Problems {
-		e.o.Log.WarnContext(ctx, "an orrery.yaml cannot be used in full; what it could not say is left out", "repo", repo.FullName, "problem", problem)
+		e.o.Log.WarnContext(ctx, "a file cannot be used in full; what it could not say is left out", "repo", repo.FullName, "problem", problem)
 	}
 	for _, d := range found.Descriptions {
 		e.o.Log.InfoContext(ctx, "repo describes a service", "repo", repo.FullName, "file", d.File, "described", d.Service, "apis", len(d.Provides), "consumes", len(d.Consumes))

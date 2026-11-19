@@ -16,7 +16,7 @@ import (
 
 // Rules is the version of the rules below. Bump it on any change, so every
 // repository is read again instead of trusting its last answer.
-const Rules = 12
+const Rules = 13
 
 // Service types.
 const (

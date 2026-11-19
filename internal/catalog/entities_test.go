@@ -57,3 +57,27 @@ func TestADescriptorWithNoBuildFileStillNamesItsService(t *testing.T) {
 		t.Error("nothing to place or offer writes nothing")
 	}
 }
+
+func TestConnectionsAreKeyedByServiceEnvironmentAndHost(t *testing.T) {
+	repo := &provider.Repo{Provider: provider.GitHub, FullName: "Acme/Shop"}
+	found := &services.Found{Services: []services.Service{{ID: "src/Api", Name: "Api"}}, Connections: []services.Connection{
+		{Service: "src/Api", Environment: "Prod", Kind: services.SQL, Host: "shop-prod.database.windows.net", Database: "Shop", Settings: []string{"ConnectionStrings:Main"}},
+		{Service: "src/Api", Environment: "unknown", Kind: services.AppInsights, AppInsightsKey: "0a1b2c3d-0000-4000-8000-000000000001", Settings: []string{"InstrumentationKey"}},
+	}}
+	got := ConnectionEntities(repo, found)
+	if len(got) != 2 {
+		t.Fatalf("connections = %+v", got)
+	}
+	sql, ai := got[0], got[1]
+	if sql.Key != "github/acme/shop/src/api@Prod>shop-prod.database.windows.net/shop@code" || sql.Relations["service"] != "github/acme/shop/src/api" || sql.Title != "Api (Prod) to shop-prod.database.windows.net/Shop" {
+		t.Errorf("sql = %+v", sql)
+	}
+	want := map[string]any{"host": "shop-prod.database.windows.net", "resource_name": "shop-prod", "database": "Shop", "kind": "sql", "evidence": "code",
+		"environment_name": "Prod", "setting_names": []string{"ConnectionStrings:Main"}, "app_insights_key": nil}
+	if !reflect.DeepEqual(sql.Fields, want) {
+		t.Errorf("sql fields = %#v", sql.Fields)
+	}
+	if ai.Key != "github/acme/shop/src/api@unknown>0a1b2c3d-0000-4000-8000-000000000001@code" || ai.Fields["host"] != nil || ai.Fields["resource_name"] != nil || ai.Fields["app_insights_key"] != "0a1b2c3d-0000-4000-8000-000000000001" || ai.Fields["kind"] != "appinsights" {
+		t.Errorf("app insights = %+v", ai)
+	}
+}

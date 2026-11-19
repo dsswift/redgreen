@@ -53,7 +53,9 @@ The forges' door into Orrery. Read `README.md` first.
   writes. `internal/services/descriptor.go` reads a repository's
   `orrery.yaml`; it is the only reader of one. An app never writes its own
   description: redgreen reads its own file from its repository like any
-  other.
+  other. `connections.go` and `endpoints.go` read the config files beside
+  each service and keep host and database names only; no value ever leaves
+  them.
   `internal/telemetry` is logs, traces, and metrics.
 
 ## Rules of the house
