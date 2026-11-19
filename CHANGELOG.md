@@ -55,6 +55,12 @@ All notable changes to this project will be documented in this file. See [standa
 * one language list and open fields ([dafe517](https://github.com/dsswift/redgreen/commit/dafe5174f0f73ab5ec834e686569882f91c35749))
 * push forge deployments to orrery ([185abff](https://github.com/dsswift/redgreen/commit/185abff406076d4b4a343b502ade925caf96625e))
 
+## [1.9.0](https://github.com/dsswift/redgreen/compare/v1.8.0...v1.9.0) (2026-11-19)
+
+### Features
+
+* **redgreen:** probe paths an estate names ([34d7b7c](https://github.com/dsswift/redgreen/commit/34d7b7cfbba158255df8b6553d067f2b7788b31d))
+
 ## [1.8.0](https://github.com/dsswift/redgreen/compare/v1.7.4...v1.8.0) (2026-11-19)
 
 ### Features
