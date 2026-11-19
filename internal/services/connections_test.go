@@ -15,7 +15,7 @@ func readConnections(t *testing.T, files map[string]string, secrets ...string) *
 	for p, s := range files {
 		m.files[p] = []byte(s)
 	}
-	found, _, err := Read(context.Background(), m, "github/acme/shop", "shop", nil, Bots{})
+	found, _, err := Read(context.Background(), m, "github/acme/shop", "shop", nil, Bots{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

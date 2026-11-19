@@ -210,6 +210,7 @@ func RepositoryBlueprint() sdk.Blueprint {
 			f("has_readme", typed("boolean", "title", "Has README")),
 			f("has_dockerfile", typed("boolean", "title", "Has Dockerfile")),
 			f("has_ci", typed("boolean", "title", "Has CI")),
+			f("paths_present", typed("array", "title", "Paths present", "description", "The paths the estate asked redgreen to look for that exist on the default branch, as files or folders. Empty when it looked and found none; unset when it did not look.")),
 			f("last_push", typed("datetime")),
 			f("last_committer", typed("string", "description", "Who made the newest commit on the default branch, as the forge names them.")),
 			f("last_committer_email", typed("string", "title", "Last committer email", "description", "The address on that commit, lowercase. It may be a personal or made-up address.")),

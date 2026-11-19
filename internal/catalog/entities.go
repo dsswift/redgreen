@@ -49,8 +49,9 @@ func ptr[T any](p *T) any {
 // staleAfter is how long an open pull request may sit before it counts as stale.
 const staleAfter = 7 * 24 * time.Hour
 
-// RepositoryEntity is one repository's facts. Its health is calculated in Orrery.
-func RepositoryEntity(r *provider.Repo, now time.Time) sdk.Entity {
+// RepositoryEntity is one repository's facts, with which probe paths its
+// files hold when found has them. Its health is calculated in Orrery.
+func RepositoryEntity(r *provider.Repo, found *services.Found, now time.Time) sdk.Entity {
 	stale, failing := 0, 0
 	for _, pr := range r.PullRequests {
 		if now.Sub(pr.UpdatedAt) > staleAfter {
@@ -67,6 +68,10 @@ func RepositoryEntity(r *provider.Repo, now time.Time) sdk.Entity {
 		"open_issues": r.OpenIssues, "stars": r.Stars, "pipelines": len(r.Pipelines), "has_ci": len(r.Pipelines) > 0,
 		"last_release": nil, "last_release_at": nil,
 		"dependabot_critical": nil, "dependabot_high": nil, "code_scanning_critical": nil, "code_scanning_high": nil,
+		"paths_present": nil,
+	}
+	if found != nil && found.PathsPresent != nil {
+		fields["paths_present"] = found.PathsPresent
 	}
 	if len(r.Releases) > 0 {
 		fields["last_release"], fields["last_release_at"] = r.Releases[0].Tag, stamp(&r.Releases[0].PublishedAt)

@@ -83,7 +83,7 @@ func (e *Engine) entities(ctx context.Context, key string, now time.Time) (writt
 		return written{}, false
 	}
 	r := t.repo
-	out := written{repository: catalog.RepositoryEntity(r, now)}
+	out := written{repository: catalog.RepositoryEntity(r, t.found, now)}
 	release := catalog.JudgeRelease(r.Pipelines)
 	for _, p := range r.Pipelines {
 		history, err := state.Runs[provider.Run](ctx, e.o.Store, catalog.PipelineKey(key, p.ID))

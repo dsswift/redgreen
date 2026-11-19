@@ -29,13 +29,15 @@ const webhookDebounce = 3 * time.Second
 
 // Options configure an Engine.
 type Options struct {
-	Providers   []provider.Provider
-	Store       *state.Store
-	Push        *sdk.Client
-	Read        *outcomes.Reader
-	Tel         *telemetry.Telemetry
-	Log         *slog.Logger
-	Bots        services.Bots
+	Providers []provider.Provider
+	Store     *state.Store
+	Push      *sdk.Client
+	Read      *outcomes.Reader
+	Tel       *telemetry.Telemetry
+	Log       *slog.Logger
+	Bots      services.Bots
+	// Probe is the paths looked for in every repository; empty looks for none.
+	Probe       []string
 	Interval    time.Duration
 	Concurrency int
 	GitLabHost  string
@@ -318,7 +320,7 @@ func (e *Engine) services(ctx context.Context, p provider.Provider, t *tracked, 
 		e.o.Log.WarnContext(ctx, "services could not be read; the last answer stands", "repo", repo.FullName, "error", err)
 		return previous
 	}
-	found, out, err := services.Read(ctx, files, key, repo.Name, previous, e.o.Bots)
+	found, out, err := services.Read(ctx, files, key, repo.Name, previous, e.o.Bots, e.o.Probe)
 	if err != nil {
 		e.o.Log.WarnContext(ctx, "services could not be read; the last answer stands", "repo", repo.FullName, "error", err)
 		return previous
@@ -326,7 +328,7 @@ func (e *Engine) services(ctx context.Context, p provider.Provider, t *tracked, 
 	if out.Reused {
 		return found
 	}
-	e.o.Log.InfoContext(ctx, "services read", "repo", repo.FullName, "commit", found.Commit, "services", len(found.Services), "connections", len(found.Connections), "filesRead", out.Read)
+	e.o.Log.InfoContext(ctx, "services read", "repo", repo.FullName, "commit", found.Commit, "services", len(found.Services), "connections", len(found.Connections), "filesRead", out.Read, "probed", found.Probed, "pathsPresent", found.PathsPresent)
 	if out.Read > services.ReadBudget {
 		e.o.Log.WarnContext(ctx, "read budget spent; services found so far stand", "repo", repo.FullName, "budget", services.ReadBudget)
 	}

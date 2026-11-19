@@ -3,6 +3,7 @@ package catalog
 import (
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/dsswift/redgreen/internal/provider"
 	"github.com/dsswift/redgreen/internal/services"
@@ -79,5 +80,24 @@ func TestConnectionsAreKeyedByServiceEnvironmentAndHost(t *testing.T) {
 	}
 	if ai.Key != "github/acme/shop/src/api@unknown>0a1b2c3d-0000-4000-8000-000000000001@code" || ai.Fields["host"] != nil || ai.Fields["resource_name"] != nil || ai.Fields["app_insights_key"] != "0a1b2c3d-0000-4000-8000-000000000001" || ai.Fields["kind"] != "appinsights" {
 		t.Errorf("app insights = %+v", ai)
+	}
+}
+
+func TestRepositoryCarriesThePathsPresent(t *testing.T) {
+	repo := &provider.Repo{Provider: provider.GitHub, FullName: "acme/site"}
+	for _, c := range []struct {
+		name  string
+		found *services.Found
+		want  any
+	}{
+		{"not read", nil, nil},
+		{"not probed", &services.Found{}, nil},
+		{"probed, none", &services.Found{PathsPresent: []string{}}, []string{}},
+		{"probed, some", &services.Found{PathsPresent: []string{"docs/notes"}}, []string{"docs/notes"}},
+	} {
+		got, ok := RepositoryEntity(repo, c.found, time.Now()).Fields["paths_present"]
+		if !ok || !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s: paths_present = %#v (%v), want %#v", c.name, got, ok, c.want)
+		}
 	}
 }

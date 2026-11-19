@@ -20,6 +20,11 @@ type Found struct {
 	Descriptions []Description `json:"descriptions,omitempty"`
 	// Connections are the hosts the services' config files name.
 	Connections []Connection `json:"connections,omitempty"`
+	// Probed is the paths the estate asked to look for when this was read.
+	Probed []string `json:"probed,omitempty"`
+	// PathsPresent is the probed paths that exist: nil when none were probed
+	// or the listing was partial, empty when probed and none exist.
+	PathsPresent []string `json:"pathsPresent"`
 	// Problems say why an orrery.yaml, the logo it names, or a config file cannot be used in full.
 	Problems []string `json:"problems,omitempty"`
 }
@@ -50,14 +55,19 @@ type Outcome struct {
 }
 
 // Read finds the services at the head of a repository's default branch,
-// reads its orrery.yaml, and reads the hosts each service's config files name. The last answer stands while the branch has not
-// moved and the rules have not changed, so a quiet repository costs one look
-// at its head.
-func Read(ctx context.Context, files Files, repoKey, repoName string, previous *Found, bots Bots) (*Found, Outcome, error) {
+// reads its orrery.yaml, reads the hosts each service's config files name,
+// and says which of the probe paths exist. The last answer stands while the
+// branch has not moved and the rules and the probe have not changed, so a
+// quiet repository costs one look at its head.
+func Read(ctx context.Context, files Files, repoKey, repoName string, previous *Found, bots Bots, probe []string) (*Found, Outcome, error) {
 	if files == nil {
-		return &Found{Rules: Rules}, Outcome{}, nil
+		out := &Found{Rules: Rules, Probed: probe}
+		if len(probe) > 0 {
+			out.PathsPresent = []string{}
+		}
+		return out, Outcome{}, nil
 	}
-	if previous != nil && previous.Commit == files.Commit() && previous.Rules == Rules {
+	if previous != nil && previous.Commit == files.Commit() && previous.Rules == Rules && slices.Equal(previous.Probed, probe) {
 		return previous, Outcome{Reused: true}, nil
 	}
 	paths, err := files.List(ctx)
@@ -65,7 +75,14 @@ func Read(ctx context.Context, files Files, repoKey, repoName string, previous *
 		return nil, Outcome{}, err
 	}
 	reader := &budgeted{ctx: ctx, files: files, budget: ReadBudget}
-	out := &Found{Commit: files.Commit(), Rules: Rules}
+	out := &Found{Commit: files.Commit(), Rules: Rules, Probed: probe}
+	if len(probe) > 0 {
+		if p, ok := files.(Partial); ok && p.Partial() {
+			out.Problems = append(out.Problems, "the forge cut the file tree short, so which probe paths exist is not known")
+		} else {
+			out.PathsPresent = Present(paths, probe)
+		}
+	}
 	out.Services = Detect(paths, reader.read, repoName)
 	out.connect(paths, reader.read)
 	if reader.err != nil {

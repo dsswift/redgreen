@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +21,9 @@ type Config struct {
 	SyncInterval time.Duration
 	Concurrency  int
 	BotAuthors   []string
+	// ProbePaths are files or folders, from the repository root, looked for
+	// on each default branch. Empty looks for none.
+	ProbePaths []string
 	// The flaky rule: the newest finished runs read for evidence, the passes
 	// in a row that clear it, and the oldest evidence that counts, in days.
 	FlakyWindowRuns int
@@ -106,6 +111,7 @@ func Parse(get func(string) string) (Config, error) {
 		SyncInterval: time.Duration(num("SYNC_INTERVAL_MINUTES", 5)) * time.Minute,
 		Concurrency:  num("SYNC_CONCURRENCY", 4),
 		BotAuthors:   list("BOT_AUTHORS"),
+		ProbePaths:   probePaths(list("PROBE_PATHS"), &errs),
 
 		FlakyWindowRuns: num("FLAKY_WINDOW_RUNS", 20),
 		FlakyClearRuns:  num("FLAKY_CLEAR_RUNS", 5),
@@ -151,4 +157,21 @@ func Parse(get func(string) string) (Config, error) {
 		return Config{}, fmt.Errorf("invalid configuration: %w", err)
 	}
 	return c, nil
+}
+
+// probePaths cleans each path to the form a forge lists, slash separated
+// from the root, and drops repeats. A path that leaves the root is an error.
+func probePaths(in []string, errs *[]error) []string {
+	var out []string
+	for _, p := range in {
+		clean := strings.Trim(path.Clean("/"+strings.TrimSpace(p)), "/")
+		if clean == "" || slices.Contains(strings.Split(p, "/"), "..") {
+			*errs = append(*errs, fmt.Errorf("PROBE_PATHS: %q is not a path inside the repository", p))
+			continue
+		}
+		if !slices.Contains(out, clean) {
+			out = append(out, clean)
+		}
+	}
+	return out
 }

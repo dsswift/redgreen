@@ -228,7 +228,7 @@ func TestReadStampsLastChange(t *testing.T) {
 	f := memFiles{commit: "a", files: map[string][]byte{"main.go": []byte("package main\nfunc main() {}\n")}, recent: []Commit{
 		{At: "3", By: "release-damnit"}, {At: "2", By: "dependabot[bot]"}, {At: "1", By: "a-developer", Email: " A.Developer@Example.com "},
 	}}
-	found, _, err := Read(context.Background(), f, "github/acme/tool", "tool", nil, Bots{})
+	found, _, err := Read(context.Background(), f, "github/acme/tool", "tool", nil, Bots{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,25 +242,25 @@ func TestReadAgainOnlyWhenBranchOrRulesMoved(t *testing.T) {
 	files := func(commit string) memFiles {
 		return memFiles{commit: commit, files: map[string][]byte{"main.go": []byte("package main\nfunc main() {}\n")}, reads: &reads}
 	}
-	first, out, _ := Read(ctx, files("a"), "github/acme/tool", "tool", nil, Bots{})
+	first, out, _ := Read(ctx, files("a"), "github/acme/tool", "tool", nil, Bots{}, nil)
 	if out.Reused || first.Commit != "a" || first.Rules != Rules || first.Services[0].Type != Tool || first.Services[0].Language != "Go" {
 		t.Fatalf("first read: %+v %+v", first, out)
 	}
-	if _, out, _ := Read(ctx, files("a"), "github/acme/tool", "tool", first, Bots{}); !out.Reused {
+	if _, out, _ := Read(ctx, files("a"), "github/acme/tool", "tool", first, Bots{}, nil); !out.Reused {
 		t.Fatal("same commit read again")
 	}
-	if _, out, _ := Read(ctx, files("b"), "github/acme/tool", "tool", first, Bots{}); out.Reused {
+	if _, out, _ := Read(ctx, files("b"), "github/acme/tool", "tool", first, Bots{}, nil); out.Reused {
 		t.Fatal("moved branch reused")
 	}
 	older := *first
 	older.Rules = Rules - 1
-	if _, out, _ := Read(ctx, files("a"), "github/acme/tool", "tool", &older, Bots{}); out.Reused {
+	if _, out, _ := Read(ctx, files("a"), "github/acme/tool", "tool", &older, Bots{}, nil); out.Reused {
 		t.Fatal("older rules reused")
 	}
 	if len(reads) != 3 {
 		t.Fatalf("reads = %d, want 3", len(reads))
 	}
-	empty, _, _ := Read(ctx, nil, "github/acme/x", "x", nil, Bots{})
+	empty, _, _ := Read(ctx, nil, "github/acme/x", "x", nil, Bots{}, nil)
 	same(t, *empty, Found{Rules: Rules})
 }
 
@@ -352,7 +352,7 @@ func TestEachServiceMayHaveItsOwnDescriptor(t *testing.T) {
 		"apps/cart/orrery.yaml":     []byte("service: github/acme/mono/apps/shop\n"),
 		"deploy/alerts/orrery.yaml": []byte("groups: []\n"),
 	}}
-	found, _, err := Read(ctx, m, "github/acme/mono", "mono", nil, Bots{})
+	found, _, err := Read(ctx, m, "github/acme/mono", "mono", nil, Bots{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -260,9 +260,14 @@ type files struct {
 	name   string
 	blobs  map[string]string
 	log    *slog.Logger
+	// truncated is set when the last List came back cut short.
+	truncated bool
 }
 
 func (x *files) Commit() string { return x.commit }
+
+// Partial says the last List missed files: GitHub cuts a large tree short.
+func (x *files) Partial() bool { return x.truncated }
 
 func (x *files) List(ctx context.Context) ([]string, error) {
 	tree, err := provider.Once(ctx, x.f, x.repo+"/git/trees/"+x.commit+"?recursive=1", provider.JSON[struct {
@@ -276,6 +281,7 @@ func (x *files) List(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	x.truncated = tree.Truncated
 	if tree.Truncated {
 		x.log.WarnContext(ctx, "file tree truncated by github; services are read from part of it", "repo", x.name, "files", len(tree.Tree))
 	}

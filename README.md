@@ -14,7 +14,7 @@ that can be rebuilt by one sweep.
 
 | Blueprint | Kind | What it carries |
 | --- | --- | --- |
-| `sw_repository` | inventory | forge, account, default branch, archived, visibility, language, last push, branch protection, alert counts, pull requests failing checks, days idle, the health rules, and a calculated `status` with `status_reason` |
+| `sw_repository` | inventory | forge, account, default branch, archived, visibility, language, last push, branch protection, alert counts, pull requests failing checks, days idle, which `PROBE_PATHS` exist (`paths_present`), the health rules, and a calculated `status` with `status_reason` |
 | `sw_pipeline` | inventory | one per workflow, build definition, or schedule: the latest default-branch run, schedule state, newest release build, 30-day success rate, median duration, a 60-day success trend, and a flaky flag. Runs stay on the forge. |
 | `sw_service` | inventory | each service found from the files that build it (folder, kind, language, icon, last human change, README, Dockerfile, tests), and its DORA measures. The one a repository's `orrery.yaml` describes also carries its logo, the APIs it calls (`consumes`, `will_consume`), and the fields and relations that place it in the estate's scheme. |
 | `sw_api` | inventory | each API a repository's `orrery.yaml` says its service provides: kind, description, and where its definition is read |
@@ -141,6 +141,7 @@ redgreen serve
 | `SYNC_INTERVAL_MINUTES` | Minutes between sweeps, 5. |
 | `SYNC_CONCURRENCY` | Repositories read at once, 4. |
 | `BOT_AUTHORS` | More commit authors that count as automation, comma separated. |
+| `PROBE_PATHS` | Files or folders to look for in every repository, from its root, comma separated: `docs/notes,docs/guides`. Each repository's `paths_present` lists the ones its default branch holds, empty when it holds none, and stays unset when this is empty. It reads the file tree redgreen already lists for services, so it costs no extra calls. A tree GitHub cuts short leaves `paths_present` unset, since a missing path may still be there. |
 | `FLAKY_WINDOW_RUNS`, `FLAKY_CLEAR_RUNS`, `FLAKY_MAX_AGE_DAYS` | The flaky rule: finished runs read, 20; passes in a row that clear it, 5; days evidence counts, 180. |
 | `ORRERY_URL` | The hub's machine surface. |
 | `ORRERY_TOKEN` | A source token, registered for the blueprints above, with a delete grant on `sw_deployment` so it can remove its copy of a job another source reports. |
