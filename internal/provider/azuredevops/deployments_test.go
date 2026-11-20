@@ -29,7 +29,7 @@ func TestDeploymentsComeFromEnvironmentRecords(t *testing.T) {
 		if result == "" {
 			finish = ""
 		}
-		return fmt.Sprintf(`{"id":%d,"result":%q,"queueTime":"%s","startTime":"%s"%s,"owner":{"id":%d,"_links":{"web":{"href":"https://dev.azure.com/b/%d"}}}}`,
+		return fmt.Sprintf(`{"id":%d,"stageName":"Deploy","jobName":"Deploy_Api","result":%q,"queueTime":"%s","startTime":"%s"%s,"owner":{"id":%d,"_links":{"web":{"href":"https://dev.azure.com/b/%d"}}}}`,
 			id, result, at(queued), at(queued-time.Minute), finish, build, build)
 	}
 	const records = "GET /acme/p1/_apis/distributedtask/environments/%d/environmentdeploymentrecords?api-version=7.1%s&top=500"
@@ -70,7 +70,7 @@ func TestDeploymentsComeFromEnvironmentRecords(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("deployments = %+v\nwant %+v\nanother repository's, a purged build's, and one before the window are left out", got, want)
 	}
-	if d := r.Deployments[2]; d.URL != "https://dev.azure.com/b/100" || d.Actor != "A Developer" || !d.CreatedAt.Equal(now.Add(-2*time.Hour+time.Minute)) || !d.FinishedAt.Equal(now.Add(-2*time.Hour+10*time.Minute)) {
+	if d := r.Deployments[2]; d.URL != "https://dev.azure.com/b/100" || d.Actor != "A Developer" || d.Job != "Deploy/Deploy_Api" || !d.CreatedAt.Equal(now.Add(-2*time.Hour+time.Minute)) || !d.FinishedAt.Equal(now.Add(-2*time.Hour+10*time.Minute)) {
 		t.Errorf("deployment = %+v; it carries its build's page and who asked, and the job's own times", d)
 	}
 
@@ -114,5 +114,28 @@ func TestCommitsBetweenAreOldestFirst(t *testing.T) {
 	}
 	if got, err = p.CommitsBetween(context.Background(), account, repo, "lost", "head"); err != nil || got != nil {
 		t.Errorf("a base the forge no longer has = %+v, %v; want unknown", got, err)
+	}
+}
+
+func TestPathsBetweenComeFromTheCommitsDiff(t *testing.T) {
+	const repo = "/acme/_apis/git/repositories/r1"
+	p, _ := testProvider(t, map[string]providertest.Route{
+		"POST /tenant/oauth2/v2.0/token": {Body: `{"access_token":"tok","expires_in":3600}`},
+		"GET " + repo + "/diffs/commits?%24top=1000&api-version=7.1&baseVersion=base&baseVersionType=commit&targetVersion=head&targetVersionType=commit": {Body: `{"changes":[
+			{"item":{"path":"/Api","isFolder":true}},
+			{"item":{"path":"/Api/Program.cs","gitObjectType":"blob"}},
+			{"item":{"path":"/Web/app.ts","gitObjectType":"blob"},"originalPath":"/Site/app.ts"}]}`},
+		"GET " + repo + "/commits/head/changes?api-version=7.1&top=1000": {Body: `{"changes":[{"item":{"path":"/README.md","gitObjectType":"blob"}}]}`},
+	})
+	account, r := provider.Account{Login: "acme"}, &provider.Repo{ID: "azuredevops:r1", FullName: "acme/Home/site"}
+	got, err := p.PathsBetween(context.Background(), account, r, "base", "head")
+	if want := []string{"Api/Program.cs", "Web/app.ts", "Site/app.ts"}; err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("paths = %v, %v; want %v: files only, a rename at both paths", got, err, want)
+	}
+	if got, err = p.PathsBetween(context.Background(), account, r, "", "head"); err != nil || !reflect.DeepEqual(got, []string{"README.md"}) {
+		t.Errorf("head's own paths = %v, %v", got, err)
+	}
+	if got, err = p.PathsBetween(context.Background(), account, r, "lost", "head"); err != nil || got != nil {
+		t.Errorf("a base the forge no longer has = %v, %v; want unknown", got, err)
 	}
 }

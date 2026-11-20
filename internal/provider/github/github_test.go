@@ -44,6 +44,7 @@ func routes() map[string]providertest.Route {
 		"GET " + repoPath + "/actions/runs":                             r("runs.json"),
 		"GET " + repoPath + "/contents/.github/workflows/pipeline.yaml": r("workflow-file.json"),
 		"GET " + repoPath + "/compare/c0...c2":                          r("compare.json"),
+		"GET " + repoPath + "/commits/c2":                               {Body: `{"sha":"c2","files":[{"filename":"README.md"}]}`},
 		"GET " + repoPath + "/actions/workflows/7/runs":                 {Body: `{"total_count":0,"workflow_runs":[]}`},
 	}
 }
@@ -185,6 +186,21 @@ func TestCommitsBetween(t *testing.T) {
 	unknown, err := p.CommitsBetween(context.Background(), acme, &provider.Repo{FullName: "acme/mirror"}, "gone", "c2")
 	if err != nil || unknown != nil {
 		t.Errorf("a compare the forge cannot answer is unknown, not an error: %v %v", unknown, err)
+	}
+}
+
+func TestPathsBetween(t *testing.T) {
+	p := newProvider(t, providertest.New(t, routes()), Config{})
+	repo := &provider.Repo{FullName: "acme/mirror"}
+	got, err := p.PathsBetween(context.Background(), acme, repo, "c0", "c2")
+	if want := []string{"services/api/main.go", "web/app.ts", "site/app.ts"}; err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("paths = %v, %v; want %v, a rename at both paths", got, err, want)
+	}
+	if got, err := p.PathsBetween(context.Background(), acme, repo, "", "c2"); err != nil || !reflect.DeepEqual(got, []string{"README.md"}) {
+		t.Errorf("head's own paths = %v, %v", got, err)
+	}
+	if got, err := p.PathsBetween(context.Background(), acme, repo, "gone", "c2"); err != nil || got != nil {
+		t.Errorf("a compare the forge cannot answer is unknown, not an error: %v %v", got, err)
 	}
 }
 

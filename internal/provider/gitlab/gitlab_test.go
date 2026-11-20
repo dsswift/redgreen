@@ -93,7 +93,7 @@ func gitlabRoutes() map[string]providertest.Route {
 		"GET /api/v4/projects/42/merge_requests/5":                b(`{"head_pipeline":{"status":"failed"}}`),
 		"GET /api/v4/projects/42/issues":                          b(`[{"iid":9,"title":"Broken link","web_url":"https://gitlab.example/acme/api/-/issues/9","labels":["docs"],"user_notes_count":1,"created_at":"2026-09-01T00:00:00Z","updated_at":"2026-09-02T00:00:00Z","issue_type":"issue","author":{"username":"user1"},"assignees":[{"username":"dev"}],"milestone":null}]`),
 		"POST /api/graphql":                                       b(`{"data":{"project":{"securityScanners":{"enabled":["DEPENDENCY_SCANNING"]},"dependency":{"critical":1,"high":0},"code":{"critical":0,"high":0}}}}`),
-		"GET /api/v4/projects/42/deployments":                     b(`[{"id":77,"ref":"main","sha":"abc","status":"success","created_at":"2026-09-30T01:00:00Z","updated_at":"2026-09-30T01:05:00Z","environment":{"name":"production"},"user":{"username":"dev"},"deployable":{"finished_at":"2026-09-30T01:04:00Z","web_url":"https://gitlab.example/job/1"}}]`),
+		"GET /api/v4/projects/42/deployments":                     b(`[{"id":77,"ref":"main","sha":"abc","status":"success","created_at":"2026-09-30T01:00:00Z","updated_at":"2026-09-30T01:05:00Z","environment":{"name":"production"},"user":{"username":"dev"},"deployable":{"name":"deploy:orders","stage":"deploy","finished_at":"2026-09-30T01:04:00Z","web_url":"https://gitlab.example/job/1"}}]`),
 		"GET /api/v4/projects/42/repository/branches/main":        b(`{"name":"main","protected":true,"commit":{"id":"head","author_name":"A Developer","author_email":"Dev@Example.com","committed_date":"2026-09-30T00:00:00Z"}}`),
 		"GET /api/v4/projects/42/protected_branches/main":         b(`{"name":"main"}`),
 		"GET /api/v4/projects/42/approval_rules":                  {Status: 404, Body: `{"message":"404 Not found"}`},
@@ -125,7 +125,7 @@ func TestSyncNormalisesAProject(t *testing.T) {
 	if r.PullRequests[0].Checks != provider.ChecksFailure || r.Issues[0].Number != 9 || r.Issues[0].Comments != 1 {
 		t.Errorf("merge requests %+v issues %+v", r.PullRequests, r.Issues)
 	}
-	if d := r.Deployments[0]; d.Status != provider.DeploySucceeded || d.FinishedAt == nil || d.FinishedAt.Format("15:04") != "01:04" || d.Environment != "production" {
+	if d := r.Deployments[0]; d.Status != provider.DeploySucceeded || d.FinishedAt == nil || d.FinishedAt.Format("15:04") != "01:04" || d.Environment != "production" || d.Job != "deploy/deploy:orders" {
 		t.Errorf("deployment = %+v", d)
 	}
 	f := r.Facts
@@ -237,5 +237,27 @@ func TestScheduleRunsAreTheNewestWhenTheForgeListsOldestFirst(t *testing.T) {
 	runs := r.Pipelines[1].Runs
 	if len(runs) != runsPerPipeline || runs[0].ID != "39" || runs[len(runs)-1].ID != "10" {
 		t.Fatalf("schedule runs = %d, newest %s, oldest %s; want the newest %d, 39 down to 10", len(runs), runs[0].ID, runs[len(runs)-1].ID, runsPerPipeline)
+	}
+}
+
+func TestPathsBetween(t *testing.T) {
+	forge := providertest.New(t, map[string]providertest.Route{
+		"GET /api/v4/projects/42/repository/compare?from=a&to=b": {Body: `{"commits":[],"diffs":[{"old_path":"services/api/main.go","new_path":"services/api/main.go"},{"old_path":"site/app.ts","new_path":"web/app.ts"}]}`},
+		"GET /api/v4/projects/42/repository/commits/b/diff":      {Body: `[{"old_path":"README.md","new_path":"README.md"}]`},
+	})
+	p, err := New(Config{URL: forge.URL, Token: "t", TokenAccounts: []string{"acme"}}, providertest.Store(t), forge.Client(), discard())
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := &provider.Repo{ID: "gitlab:42", FullName: "acme/api"}
+	got, err := p.PathsBetween(context.Background(), provider.Account{Login: "acme"}, repo, "a", "b")
+	if want := []string{"services/api/main.go", "web/app.ts", "site/app.ts"}; err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("paths = %v, %v; want %v, a rename at both paths", got, err, want)
+	}
+	if got, err := p.PathsBetween(context.Background(), provider.Account{Login: "acme"}, repo, "", "b"); err != nil || !reflect.DeepEqual(got, []string{"README.md"}) {
+		t.Errorf("head's own paths = %v, %v", got, err)
+	}
+	if got, err := p.PathsBetween(context.Background(), provider.Account{Login: "acme"}, repo, "gone", "b"); err != nil || got != nil {
+		t.Errorf("a compare the forge cannot answer is unknown, not an error: %v %v", got, err)
 	}
 }

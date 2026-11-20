@@ -437,6 +437,55 @@ func (p *Provider) CommitsBetween(ctx context.Context, _ provider.Account, r *pr
 	return out, nil
 }
 
+// glDiff is one file a compare or a commit changed.
+type glDiff struct {
+	OldPath string `json:"old_path"`
+	NewPath string `json:"new_path"`
+}
+
+// diffsPerPage is how many changed files one read of a commit's diff lists.
+const diffsPerPage = 100
+
+// PathsBetween reads the files changed after base up to head through the
+// compare endpoint, which lists every diff with the commits; head's own
+// through its diff when base is empty, one page.
+func (p *Provider) PathsBetween(ctx context.Context, _ provider.Account, r *provider.Repo, base, head string) ([]string, error) {
+	id, err := numericID(r.ID)
+	if err != nil {
+		return nil, err
+	}
+	f := p.client()
+	var diffs []glDiff
+	if base == "" {
+		diffs, err = one[[]glDiff](ctx, f, p.api(fmt.Sprintf("projects/%d/repository/commits/%s/diff", id, url.PathEscape(head)), q("per_page", strconv.Itoa(diffsPerPage))))
+		if err == nil && len(diffs) == diffsPerPage {
+			p.log.WarnContext(ctx, "a commit's changed files read in part; the deployment is placed by the files listed", "project", id, "head", head, "listed", len(diffs))
+		}
+	} else {
+		type compared struct {
+			Diffs []glDiff `json:"diffs"`
+		}
+		var cmp compared
+		cmp, err = one[compared](ctx, f, p.api(fmt.Sprintf("projects/%d/repository/compare", id), q("from", base, "to", head)))
+		diffs = cmp.Diffs
+	}
+	if provider.IsStatus(err, 404) {
+		p.log.DebugContext(ctx, "paths between revisions unavailable", "project", id, "base", base, "head", head)
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := []string{}
+	for _, d := range diffs {
+		out = append(out, d.NewPath)
+		if d.OldPath != "" && d.OldPath != d.NewPath {
+			out = append(out, d.OldPath)
+		}
+	}
+	return out, nil
+}
+
 // Files reads a project's files at the head of its default branch. Read at the
 // commit, so every answer stays kept until the branch moves.
 func (p *Provider) Files(ctx context.Context, _ provider.Account, r *provider.Repo) (services.Files, error) {

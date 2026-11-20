@@ -146,7 +146,7 @@ func planImport(rows []oldDeployment, incidents []outcomes.Incident, now time.Ti
 		finished := k.record.FinishedAt
 		d := provider.Deployment{ID: k.hubKey[len(k.repoKey)+1:], Environment: k.record.Environment, Status: k.record.Status, SHA: k.record.Revision, CreatedAt: created, FinishedAt: &finished, URL: k.row.URL.String}
 		scope := strings.ToLower(k.row.Provider.String+"/"+k.row.Login.String) + "/deployments"
-		p.forge[scope] = append(p.forge[scope], catalog.DeploymentEntity(k.repoKey, k.name, service, d, o))
+		p.forge[scope] = append(p.forge[scope], catalog.DeploymentEntity(k.hubKey, k.repoKey, k.name+" to "+d.Environment, service, d, o))
 	}
 	return p
 }

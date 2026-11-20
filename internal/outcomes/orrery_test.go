@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -156,7 +157,7 @@ func TestReadAsksOnlyForWhatItMaps(t *testing.T) {
 	}
 	want := map[string]struct{ fields, relations, filter string }{
 		"sw_workload":   {"repo", "", ""},
-		"argocd_app":    {"repo_url", "workload,environment", ""},
+		"argocd_app":    {"repo_url,path", "workload,environment", ""},
 		"sw_deployment": {"status,revision,deployed_at", "app", `{"and":[{"field":"deployed_at","op":"gte","value":"2026-05-01T00:00:00Z"},{"relation":"app"}]}`},
 		"it_incident":   {"severity,opened_at,mitigated_at,resolved_at", "workload", `{"and":[{"field":"opened_at","op":"gte","value":"2026-05-01T00:00:00Z"},{"relation":"workload"}]}`},
 	}
@@ -172,13 +173,14 @@ func TestReadAsksOnlyForWhatItMaps(t *testing.T) {
 	}
 }
 
-func TestReadAsksNothingMoreOfAHubWithNoWorkloads(t *testing.T) {
-	h := &hub{answer: map[string][]map[string]any{}}
+func TestReadAsksAHubWithNoWorkloadsForItsSyncsAndNoIncidents(t *testing.T) {
+	h := estate()
+	delete(h.answer, "sw_workload")
 	syncs, apps, workloads, incidents := read(t, h)
-	if syncs != nil || apps != nil || workloads != nil || incidents != nil {
-		t.Fatalf("read %v %v %v %v", syncs, apps, workloads, incidents)
+	if len(syncs) != 1 || len(apps) != 1 || workloads != nil || incidents != nil {
+		t.Fatalf("read %v %v %v %v; an app places its syncs by its source", syncs, apps, workloads, incidents)
 	}
-	if got := h.blueprints(); len(got) != 1 || got[0] != "sw_workload" {
+	if got := h.blueprints(); !reflect.DeepEqual(got, []string{"sw_workload", "argocd_app", "sw_deployment"}) {
 		t.Errorf("asked %v", got)
 	}
 }

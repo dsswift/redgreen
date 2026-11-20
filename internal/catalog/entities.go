@@ -290,8 +290,8 @@ func (o Outcome) Fields() map[string]any {
 	return map[string]any{"lead_time_hours": ptr(o.LeadTimeHours), "commit_count": ptr(o.CommitCount), "fix_only": ptr(o.FixOnly), "failed_change": o.FailedChange, "restore_hours": ptr(o.RestoreHours)}
 }
 
-// DeploymentEntity is one forge deployment that reached an end, with its computed fields.
-func DeploymentEntity(repoKey, repoName, service string, d provider.Deployment, o Outcome) sdk.Entity {
+// DeploymentEntity is one deployment that reached an end, under key, with its computed fields.
+func DeploymentEntity(key, repoKey, title, service string, d provider.Deployment, o Outcome) sdk.Entity {
 	fields := map[string]any{"status": d.Status, "environment_name": d.Environment, "revision": d.SHA, "ref": orNil(d.Ref),
 		"deployed_at": stamp(d.FinishedAt), "started_at": stamp(&d.CreatedAt), "initiated_by": orNil(d.Actor), "url": orNil(d.URL)}
 	if d.FinishedAt != nil {
@@ -306,7 +306,7 @@ func DeploymentEntity(repoKey, repoName, service string, d provider.Deployment, 
 	if service != "" {
 		rel["service"] = service
 	}
-	return sdk.Entity{Blueprint: Deployment, Key: repoKey + "/" + d.ID, Title: repoName + " to " + d.Environment, Fields: fields, Relations: rel}
+	return sdk.Entity{Blueprint: Deployment, Key: key, Title: title, Fields: fields, Relations: rel}
 }
 
 // IssueKey keys an issue under its repository; a pull request under pull/, since forges number the two apart.

@@ -32,6 +32,32 @@ type Descriptor struct {
 	Provides    []API          `yaml:"provides" json:"provides,omitempty"`
 	Consumes    []string       `yaml:"consumes" json:"consumes,omitempty"`
 	WillConsume []string       `yaml:"will_consume" json:"willConsume,omitempty"`
+	Deploys     *Deploys       `yaml:"deploys" json:"deploys,omitempty"`
+}
+
+// Deploys says how the service reaches its environments where the forge's
+// own deployments do not say.
+type Deploys struct {
+	// Pipeline is the pipeline file, from the repository root, whose
+	// successful runs on the default branch or a release tag are the
+	// service's deployments. For a service whose forge records none.
+	Pipeline string `yaml:"pipeline" json:"pipeline,omitempty"`
+	// Environment is where those runs deploy, "production" when unset.
+	Environment string `yaml:"environment" json:"environment,omitempty"`
+	// ArgoCD are the sources of the Argo CD apps that deploy the service: a
+	// repository's browser URL, with the folder its manifests sit in.
+	ArgoCD []string `yaml:"argocd" json:"argocd,omitempty"`
+}
+
+// DefaultEnvironment is where a pipeline's runs deploy when the file does not say.
+const DefaultEnvironment = "production"
+
+// PipelineEnvironment is the environment a pipeline's runs deploy to.
+func (d *Deploys) PipelineEnvironment() string {
+	if d.Environment == "" {
+		return DefaultEnvironment
+	}
+	return d.Environment
 }
 
 var (
@@ -76,6 +102,9 @@ func ParseDescriptor(text []byte, scope string) (*Descriptor, error) {
 			return nil, fmt.Errorf("orrery.yaml: relation %q is not a relation name", k)
 		}
 	}
+	if err := checkDeploys(d.Deploys); err != nil {
+		return nil, err
+	}
 	seen := map[string]bool{}
 	for i, a := range d.Provides {
 		if a.ID == "" || a.Title == "" {
@@ -93,6 +122,32 @@ func ParseDescriptor(text []byte, scope string) (*Descriptor, error) {
 		seen[a.ID] = true
 	}
 	return &d, nil
+}
+
+// checkDeploys refuses a deploys block that names no file in the repository
+// or a source that is no web address. A pipeline path is kept in its clean form.
+func checkDeploys(d *Deploys) error {
+	if d == nil {
+		return nil
+	}
+	if d.Pipeline == "" && len(d.ArgoCD) == 0 {
+		return errors.New("orrery.yaml: deploys needs a pipeline or argocd sources")
+	}
+	if d.Pipeline != "" {
+		file, err := specPath(d.Pipeline)
+		if err != nil || file == "" {
+			return fmt.Errorf("orrery.yaml: deploys.pipeline %q is not a file in the repository", d.Pipeline)
+		}
+		d.Pipeline = file
+	} else if d.Environment != "" {
+		return errors.New("orrery.yaml: deploys.environment is the pipeline's; name the pipeline")
+	}
+	for i, src := range d.ArgoCD {
+		if !strings.HasPrefix(src, "https://") && !strings.HasPrefix(src, "http://") {
+			return fmt.Errorf("orrery.yaml: deploys.argocd[%d] %q is not a repository's web address", i, src)
+		}
+	}
+	return nil
 }
 
 // specPath is a spec's file in the repository, "" for a full URL or none.

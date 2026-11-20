@@ -133,7 +133,7 @@ func TestEntitiesWriteOnlyDefinedFields(t *testing.T) {
 	entities := []sdk.Entity{
 		RepositoryEntity(repo, nil, now),
 		PipelineEntity(repo, p, Judge(p, "main", nil, Release{}, DefaultFlaky, now)),
-		DeploymentEntity("github/acme/api", "api", "github/acme/api", provider.Deployment{ID: "1", FinishedAt: &finished}, Outcome{}),
+		DeploymentEntity("github/acme/api/1", "github/acme/api", "api to production", "github/acme/api", provider.Deployment{ID: "1", FinishedAt: &finished}, Outcome{}),
 	}
 	svcs, _ := ServiceEntities(repo, found, nil)
 	entities = append(entities, svcs...)

@@ -154,6 +154,8 @@ type glDeployment struct {
 		Username string `json:"username"`
 	} `json:"user"`
 	Deployable *struct {
+		Name       string     `json:"name"`
+		Stage      string     `json:"stage"`
 		FinishedAt *time.Time `json:"finished_at"`
 		WebURL     string     `json:"web_url"`
 	} `json:"deployable"`
@@ -278,6 +280,7 @@ func deployment(d glDeployment) provider.Deployment {
 	}
 	if d.Deployable != nil {
 		out.URL = d.Deployable.WebURL
+		out.Job = provider.JobName(d.Deployable.Stage, d.Deployable.Name)
 	}
 	if status == provider.DeploySucceeded || status == provider.DeployFailed {
 		at := d.UpdatedAt

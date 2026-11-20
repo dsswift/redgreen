@@ -34,11 +34,16 @@ The forges' door into Orrery. Read `README.md` first.
   service and per team. A forge job another source already reports with its
   job address (`Reported`, `HandOver`) is that source's deployment: redgreen
   enriches it, deletes every copy the hub holds under its own name, and
-  writes none.
-  service and per team. `orrery.go` reads Argo CD syncs, apps, workloads, and
-  `it_incident` back from Orrery with `ORRERY_READ_TOKEN`; a workload's `repo`
-  URL, read by `repourl.go`, places a sync or an incident in a repository and
-  folder. Each page of a hub list goes through `provider.Get` like a forge
+  writes none. `attribute.go` is the only place a deployment is placed on a
+  service (`Attribute` for forge deployments, `MapSyncs` for Argo CD syncs);
+  it runs on every pass over the deployments kept for the window, so a rule
+  change places old deployments too. A deployment of several services is
+  one record per service, keyed `<key>@<service folder>` past the first; a
+  pipeline deployment is keyed `<service>@run-<id>`. redgreen deletes a key
+  of its own shape that it no longer makes. `orrery.go` reads Argo CD syncs,
+  apps, workloads, and `it_incident` back from Orrery with
+  `ORRERY_READ_TOKEN`; a workload's `repo` URL, read by `repourl.go`, places
+  a sync or an incident in a repository and folder. Each page of a hub list goes through `provider.Get` like a forge
   read, so an unchanged page is a 304. A question must read the same from one
   cycle to the next, or its tag never matches: a time in a filter is asked by
   the day (`since`) and trimmed to the moment in Go.

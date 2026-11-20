@@ -1,7 +1,8 @@
 // Package state is redgreen's small, rebuildable store: per request URL the
 // ETag and the normalised facts read from that answer, never the raw body;
 // webhook delivery ids; the run, deployment, and issue facts that outlive one
-// forge answer; and what was last written to Orrery. Losing the file costs
+// forge answer, with the files each deployed range changed; and what was last
+// written to Orrery. Losing the file costs
 // one full sweep.
 package state
 
@@ -50,6 +51,14 @@ CREATE TABLE IF NOT EXISTS commits (
   base TEXT,
   facts TEXT NOT NULL,
   read_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS paths (
+  repo TEXT NOT NULL,
+  base TEXT NOT NULL,
+  head TEXT NOT NULL,
+  facts TEXT NOT NULL,
+  read_at TEXT NOT NULL,
+  PRIMARY KEY (repo, base, head)
 );
 CREATE TABLE IF NOT EXISTS issues (
   key TEXT PRIMARY KEY,
@@ -267,6 +276,53 @@ func (s *Store) PutServices(ctx context.Context, repo string, v any) error {
 	return err
 }
 
+// Paths returns the files a range of a repository changed, or nil when unread.
+func (s *Store) Paths(ctx context.Context, repo, base, head string) ([]string, error) {
+	var facts string
+	err := s.db.QueryRowContext(ctx, `SELECT facts FROM paths WHERE repo = ? AND base = ? AND head = ?`, repo, base, head).Scan(&facts)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := []string{}
+	return out, json.Unmarshal([]byte(facts), &out)
+}
+
+// PutPaths keeps the files a range of a repository changed. A range never
+// changes, so it is read once.
+func (s *Store) PutPaths(ctx context.Context, repo, base, head string, paths []string, now time.Time) error {
+	if paths == nil {
+		paths = []string{}
+	}
+	b, err := json.Marshal(paths)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO paths (repo, base, head, facts, read_at) VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(repo, base, head) DO UPDATE SET facts = excluded.facts, read_at = excluded.read_at`, repo, base, head, string(b), stamp(now))
+	return err
+}
+
+// WrittenKeys lists the keys written of a blueprint that hold part.
+func (s *Store) WrittenKeys(ctx context.Context, blueprint, part string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT key FROM written WHERE blueprint = ? AND instr(key, ?) > 0 ORDER BY key`, blueprint, part)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			return nil, err
+		}
+		out = append(out, k)
+	}
+	return out, rows.Err()
+}
+
 // Written returns the hash of what was last written for an entity.
 func (s *Store) Written(ctx context.Context, blueprint, key string) (string, error) {
 	var h string
@@ -315,12 +371,13 @@ func (s *Store) PutSetting(ctx context.Context, key string, v any) error {
 
 // Pruned counts what Prune removed, by table.
 type Pruned struct {
-	Responses, Deliveries, Runs, Deployments, Commits, Issues int64
+	Responses, Deliveries, Runs, Deployments, Commits, Paths, Issues int64
 }
 
 // Prune drops what no window reads any more: answers untouched for a week,
 // deliveries older than a week, runs older than sixty days, deployments and
-// their commits older than two hundred days, and issues closed ninety days ago.
+// their commits older than two hundred days, the commits and paths read that
+// long ago, and issues closed ninety days ago.
 func (s *Store) Prune(ctx context.Context, now time.Time) (Pruned, error) {
 	var p Pruned
 	day := 24 * time.Hour
@@ -333,6 +390,8 @@ func (s *Store) Prune(ctx context.Context, now time.Time) (Pruned, error) {
 		{&p.Deliveries, `DELETE FROM deliveries WHERE at < ?`, now.Add(-7 * day)},
 		{&p.Runs, `DELETE FROM runs WHERE created_at < ?`, now.Add(-60 * day)},
 		{&p.Commits, `DELETE FROM commits WHERE deployment IN (SELECT key FROM deployments WHERE finished_at < ?)`, now.Add(-200 * day)},
+		{&p.Commits, `DELETE FROM commits WHERE read_at < ?`, now.Add(-200 * day)},
+		{&p.Paths, `DELETE FROM paths WHERE read_at < ?`, now.Add(-200 * day)},
 		{&p.Deployments, `DELETE FROM deployments WHERE finished_at < ?`, now.Add(-200 * day)},
 		{&p.Issues, `DELETE FROM issues WHERE closed_at IS NOT NULL AND closed_at < ?`, now.Add(-90 * day)},
 	}
@@ -341,7 +400,8 @@ func (s *Store) Prune(ctx context.Context, now time.Time) (Pruned, error) {
 		if err != nil {
 			return p, err
 		}
-		*st.n, _ = res.RowsAffected()
+		n, _ := res.RowsAffected()
+		*st.n += n
 	}
 	return p, nil
 }

@@ -9,6 +9,7 @@ package sync
 import (
 	"context"
 	"log/slog"
+	"path"
 	"strings"
 	gosync "sync"
 	"time"
@@ -43,6 +44,9 @@ type Options struct {
 	GitLabHost  string
 	// Flaky sizes the flaky rule; an unset part takes its default.
 	Flaky catalog.FlakyRule
+	// ComponentFields are the orrery.yaml fields whose value names a service
+	// in its deployments' environments and jobs.
+	ComponentFields []string
 }
 
 // tracked is one repository as the last read left it.
@@ -288,6 +292,7 @@ func (e *Engine) syncRepo(ctx context.Context, key string) error {
 	}
 	e.readJobs(ctx, p, t, repo)
 	found := e.services(ctx, p, t, repo)
+	e.pipelineDeployments(ctx, key, repo, found)
 	e.mu.Lock()
 	if live := e.repos[key]; live != nil {
 		live.repo, live.found, live.ok = repo, found, true
@@ -298,10 +303,100 @@ func (e *Engine) syncRepo(ctx context.Context, key string) error {
 	return nil
 }
 
-// forgeDeployment is a forge deployment as the state keeps it.
+// forgeDeployment is a forge deployment as the state keeps it: one the forge
+// recorded, or one a service's pipeline rolled out.
 type forgeDeployment struct {
 	outcomes.Record
 	Deployment provider.Deployment `json:"deployment"`
+}
+
+// pipelineSource marks a deployment read from a service's pipeline runs.
+const pipelineSource = "pipeline"
+
+// pipelineDeployments keeps, for each service whose orrery.yaml says it
+// deploys by a pipeline, the deployments that pipeline's kept runs made.
+// Each is keyed `<service>@run-<run id>` and stays in the state with the
+// forge's own, so it outlives the runs.
+func (e *Engine) pipelineDeployments(ctx context.Context, key string, repo *provider.Repo, found *services.Found) {
+	if found == nil {
+		return
+	}
+	for _, d := range found.Descriptions {
+		if d.Deploys == nil || d.Deploys.Pipeline == "" {
+			continue
+		}
+		var runs []provider.Run
+		var names []string
+		for _, p := range repo.Pipelines {
+			if path.Clean(p.Path) != d.Deploys.Pipeline {
+				continue
+			}
+			kept, err := state.Runs[provider.Run](ctx, e.o.Store, catalog.PipelineKey(key, p.ID))
+			if err != nil {
+				e.o.Log.WarnContext(ctx, "kept runs unreadable; the pipeline's deployments wait for the next sync", "repo", repo.FullName, "pipeline", p.ID, "error", err)
+				continue
+			}
+			runs = append(runs, kept...)
+			names = append(names, p.Name)
+		}
+		if len(names) == 0 {
+			e.o.Log.WarnContext(ctx, "orrery.yaml names a pipeline the repository does not run; no deployments recorded from it", "repo", repo.FullName, "service", d.Service, "pipeline", d.Deploys.Pipeline)
+			continue
+		}
+		folder := targetPath(key, found, d.Service)
+		deployed := outcomes.PipelineDeployments(runs, repo.DefaultBranch, d.Deploys.PipelineEnvironment(), strings.Join(names, ", "))
+		for _, dep := range deployed {
+			rec := forgeDeployment{Record: outcomes.Record{Key: d.Service + "@" + dep.ID, Source: pipelineSource, RepoKey: key, Folder: folder, Environment: dep.Environment,
+				Status: dep.Status, Revision: dep.SHA, FinishedAt: *dep.FinishedAt, Service: d.Service, Job: dep.Job}, Deployment: dep}
+			if err := e.o.Store.PutDeployment(ctx, rec.Key, key, *dep.FinishedAt, rec); err != nil {
+				e.o.Log.WarnContext(ctx, "deployment not kept", "repo", repo.FullName, "error", err)
+			}
+		}
+		e.o.Log.InfoContext(ctx, "pipeline deployments read", "repo", repo.FullName, "service", d.Service, "pipeline", d.Deploys.Pipeline, "runs", len(runs), "deployments", len(deployed))
+	}
+}
+
+// targetPath is a service's folder: where its build files were found, or for
+// one only an orrery.yaml names, the folder its key names.
+func targetPath(repoKey string, found *services.Found, service string) string {
+	for _, s := range found.Services {
+		if catalog.ServiceKey(repoKey, s.ID) == service {
+			return s.Path
+		}
+	}
+	return strings.TrimPrefix(strings.TrimPrefix(service, repoKey), "/")
+}
+
+// targets are a repository's services as its deployments are placed on them,
+// with the components their orrery.yaml names.
+func (e *Engine) targets(repoKey string, found *services.Found) []outcomes.Target {
+	if found == nil {
+		return []outcomes.Target{}
+	}
+	seen := map[string]bool{}
+	out := []outcomes.Target{}
+	add := func(key, folder string) {
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		t := outcomes.Target{Key: key, Path: folder}
+		if d := found.Describing(key); d != nil {
+			for _, name := range e.o.ComponentFields {
+				if c, ok := d.Fields[name].(string); ok && strings.TrimSpace(c) != "" {
+					t.Components = append(t.Components, c)
+				}
+			}
+		}
+		out = append(out, t)
+	}
+	for _, s := range found.Services {
+		add(catalog.ServiceKey(repoKey, s.ID), s.Path)
+	}
+	for _, d := range found.Descriptions {
+		add(d.Service, targetPath(repoKey, found, d.Service))
+	}
+	return out
 }
 
 // services reads the services at the head of the default branch. A failed

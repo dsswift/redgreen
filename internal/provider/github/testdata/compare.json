@@ -29,5 +29,16 @@
         }
       }
     }
+  ],
+  "files": [
+    {
+      "filename": "services/api/main.go",
+      "status": "modified"
+    },
+    {
+      "filename": "web/app.ts",
+      "previous_filename": "site/app.ts",
+      "status": "renamed"
+    }
   ]
 }

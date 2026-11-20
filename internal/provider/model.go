@@ -139,6 +139,21 @@ type Deployment struct {
 	FinishedAt  *time.Time `json:"finishedAt,omitempty"`
 	URL         string     `json:"url,omitempty"`
 	Actor       string     `json:"actor,omitempty"`
+	// Job is the job, and the stage that holds it, that rolled it out, as
+	// the forge names them; "" when the forge does not say.
+	Job string `json:"job,omitempty"`
+}
+
+// JobName is a deployment's Job: the stage and the job in it, as "stage/job",
+// or whichever of the two the forge gave.
+func JobName(stage, job string) string {
+	switch {
+	case stage == "":
+		return job
+	case job == "":
+		return stage
+	}
+	return stage + "/" + job
 }
 
 // Checks states of a pull request.
@@ -295,6 +310,10 @@ type Provider interface {
 	// CommitsBetween lists the commits after base up to head, oldest first; head alone when base is empty.
 	// Nil with no error when the forge cannot say.
 	CommitsBetween(ctx context.Context, a Account, r *Repo, base, head string) ([]Commit, error)
+	// PathsBetween lists the files changed after base up to head, from the
+	// repository root; head's own when base is empty. A renamed file is listed
+	// at both paths. Nil with no error when the forge cannot say.
+	PathsBetween(ctx context.Context, a Account, r *Repo, base, head string) ([]string, error)
 	Quotas() []telemetry.Quota
 }
 

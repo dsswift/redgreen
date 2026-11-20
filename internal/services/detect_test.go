@@ -322,21 +322,39 @@ func TestReadDescriptor(t *testing.T) {
 		t.Fatalf("a missing logo costs only the logo: %+v, %q", d, problem)
 	}
 	for want, files := range map[string]map[string][]byte{
-		"a name matching ^":        {"orrery.yaml": []byte("service: github/example/app\nicon: {name: App, file: logo.svg}\n"), "logo.svg": svg},
-		"not .svg, .png, or .webp": {"orrery.yaml": []byte("service: github/example/app\nicon: {name: app, file: logo.gif}\n"), "logo.gif": svg},
-		"over 262144":              {"orrery.yaml": []byte("service: github/example/app\nicon: {name: app, file: logo.png}\n"), "logo.png": make([]byte, 256*1024+1)},
-		"service is required":      {"orrery.yaml": []byte("icon: {name: app, file: logo.svg}\n"), "logo.svg": svg},
-		"a name matching":          {"orrery.yaml": []byte("service: github/example/app\nicon: {name: app}\n")},
-		"or a folder in it":        {"orrery.yaml": []byte("service: github/example/application\n")},
-		"kind \"soap\"":            {"orrery.yaml": []byte("service: github/example/app\nprovides: [{id: a, title: A, kind: soap}]\n")},
-		"listed twice":             {"orrery.yaml": []byte("service: github/example/app\nprovides: [{id: a, title: A, kind: rest}, {id: a, title: B, kind: rest}]\n")},
-		"leaves the repository":    {"orrery.yaml": []byte("service: github/example/app\nprovides: [{id: a, title: A, kind: rest, spec: ../x.yaml}]\n")},
-		"field \"Bad\"":            {"orrery.yaml": []byte("service: github/example/app\nfields: {Bad: 1}\n")},
-		"field unknown not found":  {"orrery.yaml": []byte("service: github/example/app\nunknown: 1\n")},
+		"a name matching ^":              {"orrery.yaml": []byte("service: github/example/app\nicon: {name: App, file: logo.svg}\n"), "logo.svg": svg},
+		"not .svg, .png, or .webp":       {"orrery.yaml": []byte("service: github/example/app\nicon: {name: app, file: logo.gif}\n"), "logo.gif": svg},
+		"over 262144":                    {"orrery.yaml": []byte("service: github/example/app\nicon: {name: app, file: logo.png}\n"), "logo.png": make([]byte, 256*1024+1)},
+		"service is required":            {"orrery.yaml": []byte("icon: {name: app, file: logo.svg}\n"), "logo.svg": svg},
+		"a name matching":                {"orrery.yaml": []byte("service: github/example/app\nicon: {name: app}\n")},
+		"or a folder in it":              {"orrery.yaml": []byte("service: github/example/application\n")},
+		"kind \"soap\"":                  {"orrery.yaml": []byte("service: github/example/app\nprovides: [{id: a, title: A, kind: soap}]\n")},
+		"listed twice":                   {"orrery.yaml": []byte("service: github/example/app\nprovides: [{id: a, title: A, kind: rest}, {id: a, title: B, kind: rest}]\n")},
+		"leaves the repository":          {"orrery.yaml": []byte("service: github/example/app\nprovides: [{id: a, title: A, kind: rest, spec: ../x.yaml}]\n")},
+		"field \"Bad\"":                  {"orrery.yaml": []byte("service: github/example/app\nfields: {Bad: 1}\n")},
+		"field unknown not found":        {"orrery.yaml": []byte("service: github/example/app\nunknown: 1\n")},
+		"needs a pipeline or argocd":     {"orrery.yaml": []byte("service: github/example/app\ndeploys: {environment: production}\n")},
+		"not a file in the repository":   {"orrery.yaml": []byte("service: github/example/app\ndeploys: {pipeline: ../ci.yml}\n")},
+		"is the pipeline's":              {"orrery.yaml": []byte("service: github/example/app\ndeploys: {environment: test, argocd: [https://github.com/acme/gitops]}\n")},
+		"not a repository's web address": {"orrery.yaml": []byte("service: github/example/app\ndeploys: {argocd: [git@github.com:acme/gitops.git]}\n")},
 	} {
 		if _, _, problem := read(files); !strings.Contains(problem, want) {
 			t.Errorf("problem %q, want it to say %q", problem, want)
 		}
+	}
+}
+
+func TestADescriptorSaysHowItsServiceDeploys(t *testing.T) {
+	d, err := ParseDescriptor([]byte("service: github/example/app\ndeploys:\n  pipeline: ./.gitlab-ci.yml\n  argocd: [https://github.com/acme/gitops/tree/main/apps/app]\n"), "github/example/app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Deploys.Pipeline != ".gitlab-ci.yml" || d.Deploys.PipelineEnvironment() != "production" || d.Deploys.ArgoCD[0] != "https://github.com/acme/gitops/tree/main/apps/app" {
+		t.Errorf("deploys = %+v; the pipeline is kept in the form a forge lists it", d.Deploys)
+	}
+	d, err = ParseDescriptor([]byte("service: github/example/app\ndeploys: {pipeline: azure-pipelines.yml, environment: Prod}\n"), "github/example/app")
+	if err != nil || d.Deploys.PipelineEnvironment() != "Prod" {
+		t.Errorf("deploys = %+v, %v", d, err)
 	}
 }
 

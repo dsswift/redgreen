@@ -24,6 +24,9 @@ type Config struct {
 	// ProbePaths are files or folders, from the repository root, looked for
 	// on each default branch. Empty looks for none.
 	ProbePaths []string
+	// ComponentFields are the orrery.yaml fields whose value names a service
+	// in its deployments' environments and jobs.
+	ComponentFields []string
 	// The flaky rule: the newest finished runs read for evidence, the passes
 	// in a row that clear it, and the oldest evidence that counts, in days.
 	FlakyWindowRuns int
@@ -104,6 +107,12 @@ func Parse(get func(string) string) (Config, error) {
 		}
 		return out
 	}
+	listOr := func(name string, fallback []string) []string {
+		if v := list(name); len(v) > 0 {
+			return v
+		}
+		return fallback
+	}
 	c := Config{
 		Port:         num("PORT", 8080),
 		DataDir:      str("DATA_DIR", "./data"),
@@ -112,6 +121,8 @@ func Parse(get func(string) string) (Config, error) {
 		Concurrency:  num("SYNC_CONCURRENCY", 4),
 		BotAuthors:   list("BOT_AUTHORS"),
 		ProbePaths:   probePaths(list("PROBE_PATHS"), &errs),
+
+		ComponentFields: listOr("DEPLOY_COMPONENT_FIELDS", []string{"deploy_component"}),
 
 		FlakyWindowRuns: num("FLAKY_WINDOW_RUNS", 20),
 		FlakyClearRuns:  num("FLAKY_CLEAR_RUNS", 5),

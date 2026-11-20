@@ -33,6 +33,8 @@ type adoEnvironment struct {
 // Its owner is the build the job ran in.
 type adoDeploymentRecord struct {
 	ID         int64      `json:"id"`
+	StageName  string     `json:"stageName"`
+	JobName    string     `json:"jobName"`
 	Result     string     `json:"result"`
 	QueueTime  time.Time  `json:"queueTime"`
 	StartTime  *time.Time `json:"startTime"`
@@ -217,7 +219,7 @@ func deployStatus(r adoDeploymentRecord) string {
 }
 
 func deployment(r adoDeploymentRecord, environment string, b deployedBuild) provider.Deployment {
-	d := provider.Deployment{ID: strconv.FormatInt(r.ID, 10), Environment: environment, Status: deployStatus(r), Ref: b.ref, SHA: b.sha, CreatedAt: r.QueueTime, Actor: b.actor}
+	d := provider.Deployment{ID: strconv.FormatInt(r.ID, 10), Environment: environment, Status: deployStatus(r), Ref: b.ref, SHA: b.sha, CreatedAt: r.QueueTime, Actor: b.actor, Job: provider.JobName(r.StageName, r.JobName)}
 	if r.StartTime != nil {
 		d.CreatedAt = *r.StartTime
 	}
@@ -285,6 +287,62 @@ func (p *Provider) CommitsBetween(ctx context.Context, a provider.Account, r *pr
 	for i := len(found) - 1; i >= 0; i-- {
 		if one, ok := carried(found[i]); ok {
 			out = append(out, one)
+		}
+	}
+	return out, nil
+}
+
+// adoChange is one file a diff or a commit changed. A path starts with "/".
+type adoChange struct {
+	Item struct {
+		Path          string `json:"path"`
+		IsFolder      bool   `json:"isFolder"`
+		GitObjectType string `json:"gitObjectType"`
+	} `json:"item"`
+	OriginalPath string `json:"originalPath"`
+}
+
+// changesShown is the most changed files one diff read lists.
+const changesShown = 1000
+
+// PathsBetween reads the files changed after base up to head from the diff
+// of the two commits; head's own from its changes when base is empty. One
+// read each: a longer list is read in part and says so.
+func (p *Provider) PathsBetween(ctx context.Context, a provider.Account, r *provider.Repo, base, head string) ([]string, error) {
+	if head == "" {
+		return nil, nil
+	}
+	f := p.client()
+	repo := p.organization(a.Login) + "/_apis/git/repositories/" + repoID(r.ID)
+	type listed struct {
+		Changes []adoChange `json:"changes"`
+	}
+	var got listed
+	var err error
+	if base == "" {
+		got, err = once[listed](ctx, f, repo+"/commits/"+url.PathEscape(head)+"/changes", q("top", strconv.Itoa(changesShown)))
+	} else {
+		got, err = once[listed](ctx, f, repo+"/diffs/commits", q("baseVersion", base, "baseVersionType", "commit", "targetVersion", head, "targetVersionType", "commit", "$top", strconv.Itoa(changesShown)))
+	}
+	changes := got.Changes
+	if provider.IsStatus(err, 404) {
+		p.log.DebugContext(ctx, "paths between revisions unavailable", "repo", r.FullName, "base", base, "head", head)
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if len(changes) >= changesShown {
+		p.log.WarnContext(ctx, "changed files read in part; the deployment is placed by the files listed", "repo", r.FullName, "base", base, "head", head, "listed", len(changes))
+	}
+	out := []string{}
+	for _, c := range changes {
+		if c.Item.IsFolder || c.Item.GitObjectType == "tree" || c.Item.Path == "" {
+			continue
+		}
+		out = append(out, strings.TrimPrefix(c.Item.Path, "/"))
+		if c.OriginalPath != "" && c.OriginalPath != c.Item.Path {
+			out = append(out, strings.TrimPrefix(c.OriginalPath, "/"))
 		}
 	}
 	return out, nil

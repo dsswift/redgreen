@@ -238,6 +238,47 @@ func (p *Provider) CommitsBetween(ctx context.Context, a provider.Account, r *pr
 	return out, nil
 }
 
+// filesShown is the most changed files GitHub lists for a compare or a commit.
+const filesShown = 300
+
+type ghFile struct {
+	Filename         string `json:"filename"`
+	PreviousFilename string `json:"previous_filename"`
+}
+
+// PathsBetween reads the files changed after base up to head through the
+// compare endpoint, which lists them on its first page; head's own through
+// the commit when base is empty.
+func (p *Provider) PathsBetween(ctx context.Context, a provider.Account, r *provider.Repo, base, head string) ([]string, error) {
+	f := p.client(a)
+	repo := p.cfg.API + "/repos/" + r.FullName
+	address := repo + "/commits/" + url.PathEscape(head)
+	if base != "" {
+		address = repo + "/compare/" + url.PathEscape(base+"..."+head) + "?per_page=1"
+	}
+	got, err := one[struct {
+		Files []ghFile `json:"files"`
+	}](ctx, f, address)
+	if provider.IsStatus(err, 404, 422) {
+		p.log.DebugContext(ctx, "paths between revisions unavailable", "repo", r.FullName, "base", base, "head", head)
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if len(got.Files) >= filesShown {
+		p.log.WarnContext(ctx, "changed files cut short by github; the deployment is placed by the files listed", "repo", r.FullName, "base", base, "head", head, "listed", len(got.Files))
+	}
+	out := []string{}
+	for _, file := range got.Files {
+		out = append(out, file.Filename)
+		if file.PreviousFilename != "" {
+			out = append(out, file.PreviousFilename)
+		}
+	}
+	return out, nil
+}
+
 // Files reads the repository's tree at the head of its default branch. Files
 // are read as blobs by hash, so a read is answered from kept facts for good.
 func (p *Provider) Files(ctx context.Context, a provider.Account, r *provider.Repo) (services.Files, error) {

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"path"
 	"sort"
 	"strings"
 	"time"
@@ -95,11 +96,13 @@ func HandOver(reports []HubReport, own func(key string) bool) Handover {
 	return out
 }
 
-// HubApp is an Argo CD application.
+// HubApp is an Argo CD application: where its manifests are read, and what
+// it deploys.
 type HubApp struct {
 	Key    string `json:"key"`
 	Fields struct {
 		RepoURL string `json:"repo_url"`
+		Path    string `json:"path"`
 	} `json:"fields"`
 	Relations struct {
 		Workload    []related `json:"workload"`
@@ -132,10 +135,38 @@ type HubIncident struct {
 // Skipped counts why syncs or incidents were left out.
 type Skipped map[string]int
 
+// Places is what places an Argo CD app's syncs in a repository and on one
+// of its services.
+type Places struct {
+	// Declared are the Argo CD sources services name in their orrery.yaml.
+	Declared []Declared
+	// Targets are a tracked repository's services, by its key; nil for a
+	// repository redgreen does not watch.
+	Targets func(repoKey string) []Target
+}
+
+// Declared is one source a service says its Argo CD apps deploy it from.
+type Declared struct {
+	Source  RepoRef
+	RepoKey string
+	Target  Target
+}
+
 // MapSyncs turns the hub's Argo CD syncs into records of the repositories
-// redgreen watches. A sync names an app; the app names its workload; the
-// workload's repo URL gives the repository and the folder.
-func MapSyncs(syncs []HubDeployment, apps []HubApp, workloads []HubWorkload, tracked func(RepoRef) bool, gitlabHost string) ([]Record, Skipped) {
+// redgreen watches, each placed from the strongest signal there is:
+//
+//  1. A service's orrery.yaml names the app's source, the repository and
+//     the folder its manifests are read from: that service. The longest
+//     source named wins; two services naming the same one place neither.
+//  2. The app's workload names its repository and folder: the service in
+//     that folder, or the repository's only one.
+//  3. The app's source sits in a watched repository, inside a service's
+//     own folder: that service. A repository's root holds every folder, so
+//     it is no evidence, and a root service is placed only by naming it.
+//
+// A sync's revision is the manifests' commit; where they are kept in another
+// repository than the service's, its release tags stand in (`Elsewhere`).
+func MapSyncs(syncs []HubDeployment, apps []HubApp, workloads []HubWorkload, places Places, gitlabHost string) ([]Record, Skipped) {
 	appBy := map[string]HubApp{}
 	for _, a := range apps {
 		appBy[a.Key] = a
@@ -161,32 +192,110 @@ func MapSyncs(syncs []HubDeployment, apps []HubApp, workloads []HubWorkload, tra
 			skipped["no_app"]++
 			continue
 		}
-		var w HubWorkload
-		if len(app.Relations.Workload) > 0 {
-			w, ok = workloadBy[app.Relations.Workload[0].Key]
-		}
-		if len(app.Relations.Workload) == 0 || !ok {
-			skipped["no_workload"]++
-			continue
-		}
-		ref, ok := ParseRepoURL(w.Fields.Repo, gitlabHost)
-		if !ok {
-			skipped["no_repo_url"]++
-			continue
-		}
-		if !tracked(ref) {
-			skipped["repo_not_tracked"]++
-			continue
-		}
 		env := "production"
 		if len(app.Relations.Environment) > 0 {
 			env = app.Relations.Environment[0].Key
 		}
-		source, _ := ParseRepoURL(app.Fields.RepoURL, gitlabHost)
-		out = append(out, Record{Key: d.Key, Source: "argo", RepoKey: ref.Key(), Folder: ref.Path, Environment: env, Status: d.Fields.Status,
-			Revision: d.Fields.Revision, FinishedAt: at, Elsewhere: !SameRepo(source, ref)})
+		source, sourced := ParseRepoURL(app.Fields.RepoURL, gitlabHost)
+		if sourced && app.Fields.Path != "" {
+			source.Path = strings.TrimPrefix(path.Clean("/"+source.Path+"/"+app.Fields.Path), "/")
+		}
+		r := Record{Key: d.Key, Source: "argo", Environment: env, Status: d.Fields.Status, Revision: d.Fields.Revision, FinishedAt: at}
+		if sourced {
+			if decl, ambiguous := declaredFor(source, places.Declared); ambiguous {
+				skipped["ambiguous"]++
+				continue
+			} else if decl != nil {
+				r.RepoKey, r.Folder, r.Service = decl.RepoKey, decl.Target.Path, decl.Target.Key
+				r.Elsewhere = !strings.EqualFold(source.Key(), decl.RepoKey)
+				out = append(out, r)
+				continue
+			}
+		}
+		reason := "unplaced"
+		if len(app.Relations.Workload) > 0 {
+			w, ok := workloadBy[app.Relations.Workload[0].Key]
+			ref, parsed := ParseRepoURL(w.Fields.Repo, gitlabHost)
+			targets := places.Targets(ref.Key())
+			switch {
+			case !ok:
+				reason = "no_workload"
+			case !parsed:
+				reason = "no_repo_url"
+			case targets == nil:
+				reason = "repo_not_tracked"
+			default:
+				r.RepoKey, r.Folder, r.Service = ref.Key(), ref.Path, serviceAt(targets, ref.Path)
+				r.Elsewhere = !SameRepo(source, ref)
+				out = append(out, r)
+				continue
+			}
+		}
+		if sourced {
+			if t, ok := folderHolding(places.Targets(source.Key()), source.Path); ok {
+				r.RepoKey, r.Folder, r.Service = source.Key(), t.Path, t.Key
+				out = append(out, r)
+				continue
+			}
+		}
+		skipped[reason]++
 	}
 	return out, skipped
+}
+
+// under says whether folder sits at or below parent, however cased.
+func under(folder, parent string) bool {
+	folder, parent = strings.ToLower(strings.Trim(folder, "/")), strings.ToLower(strings.Trim(parent, "/"))
+	return parent == "" || folder == parent || strings.HasPrefix(folder, parent+"/")
+}
+
+// declaredFor is the service whose named source holds an app's, the longest
+// such source; ambiguous when two services name that one.
+func declaredFor(source RepoRef, declared []Declared) (best *Declared, ambiguous bool) {
+	depth := -1
+	for i, d := range declared {
+		if !SameRepo(d.Source, source) || !under(source.Path, d.Source.Path) {
+			continue
+		}
+		n := len(strings.Trim(d.Source.Path, "/"))
+		switch {
+		case n > depth:
+			best, depth, ambiguous = &declared[i], n, false
+		case n == depth && best.Target.Key != d.Target.Key:
+			ambiguous = true
+		}
+	}
+	if ambiguous {
+		return nil, true
+	}
+	return best, false
+}
+
+// serviceAt is the service in folder, or the repository's only one when the
+// folder is its root.
+func serviceAt(targets []Target, folder string) string {
+	for _, t := range targets {
+		if strings.EqualFold(strings.Trim(t.Path, "/"), strings.Trim(folder, "/")) {
+			return t.Key
+		}
+	}
+	if strings.Trim(folder, "/") == "" && len(targets) == 1 {
+		return targets[0].Key
+	}
+	return ""
+}
+
+// folderHolding is the deepest service folder, never the root, that holds folder.
+func folderHolding(targets []Target, folder string) (Target, bool) {
+	var best Target
+	depth := 0
+	for _, t := range targets {
+		p := strings.Trim(t.Path, "/")
+		if p != "" && under(folder, p) && len(p) > depth {
+			best, depth = t, len(p)
+		}
+	}
+	return best, depth > 0
 }
 
 // MapIncidents ties each incident to the repository and folder of its workload.
@@ -339,18 +448,16 @@ func (r Reader) Reported(ctx context.Context, from time.Time) ([]HubReport, erro
 
 // Read is one pass over what the hub holds: the workloads that place a sync
 // or an incident in a repository, the Argo CD apps, the syncs of an app
-// since `from`, and the incidents on a workload since. A sync
-// reaches a repository only through an app and its workload, and an incident
-// only through its workload, so a hub with no workloads is asked nothing more.
+// since `from`, and the incidents on a workload since. An app places its
+// syncs by its source as well as by its workload, so its syncs are read on a
+// hub with no workloads; an incident is placed only through its workload, so
+// a hub without one is asked for none.
 func (r Reader) Read(ctx context.Context, from time.Time) ([]HubDeployment, []HubApp, []HubWorkload, []HubIncident, error) {
 	workloads, err := Entities[HubWorkload](ctx, r, Ask{Blueprint: "sw_workload", Fields: []string{"repo"}, Relations: []string{}})
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("workloads: %w", err)
 	}
-	if len(workloads) == 0 {
-		return nil, nil, nil, nil, nil
-	}
-	apps, err := Entities[HubApp](ctx, r, Ask{Blueprint: "argocd_app", Fields: []string{"repo_url"}, Relations: []string{"workload", "environment"}})
+	apps, err := Entities[HubApp](ctx, r, Ask{Blueprint: "argocd_app", Fields: []string{"repo_url", "path"}, Relations: []string{"workload", "environment"}})
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("argo cd apps: %w", err)
 	}
@@ -361,6 +468,9 @@ func (r Reader) Read(ctx context.Context, from time.Time) ([]HubDeployment, []Hu
 			return nil, nil, nil, nil, fmt.Errorf("deployments: %w", err)
 		}
 		syncs = after(syncs, func(d HubDeployment) string { return d.Fields.DeployedAt }, from)
+	}
+	if len(workloads) == 0 {
+		return syncs, apps, workloads, nil, nil
 	}
 	incidents, err := Entities[HubIncident](ctx, r, Ask{Blueprint: "it_incident", Filter: map[string]any{"and": []any{since("opened_at", from), map[string]any{"relation": "workload"}}}, Fields: []string{"severity", "opened_at", "mitigated_at", "resolved_at"}, Relations: []string{"workload"}})
 	if err != nil {

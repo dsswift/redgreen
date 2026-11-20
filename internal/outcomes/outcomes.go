@@ -35,6 +35,13 @@ type Record struct {
 	// Elsewhere is set when the revision is a commit in another repository,
 	// such as a deployment manifest; the repository's release tags stand in for it.
 	Elsewhere bool `json:"elsewhere,omitempty"`
+	// Service is the service it rolled out, "" while none is known.
+	Service string `json:"service,omitempty"`
+	// Job is the forge job that rolled it out, as the forge names it.
+	Job string `json:"job,omitempty"`
+	// From is the forge deployment it was read from, when one forge
+	// deployment rolled out several services and this is one of them.
+	From string `json:"from,omitempty"`
 }
 
 // Stream is the line of deployments one record belongs to.
@@ -202,10 +209,41 @@ type Range struct {
 	Base, Head string
 }
 
-// RangeOf finds what to compare for one record: from the previous successful
-// deployment of its stream to it. A revision in another repository is stood in
-// for by the newest release published by then. ok is false when no release stands in.
-func RangeOf(r Record, records []Record, releases []provider.Release) (Range, bool) {
+// Previous is, by key, the successful deployment of the same stream that
+// ended last before each record; a stream's first has none. Deployments that
+// ended at one moment are never each other's.
+func Previous(records []Record) map[string]*Record {
+	streams := map[string][]*Record{}
+	for i := range records {
+		streams[records[i].Stream()] = append(streams[records[i].Stream()], &records[i])
+	}
+	out := map[string]*Record{}
+	for _, list := range streams {
+		sort.SliceStable(list, func(i, j int) bool { return list[i].FinishedAt.Before(list[j].FinishedAt) })
+		var last *Record
+		for i := 0; i < len(list); {
+			j := i
+			for j < len(list) && list[j].FinishedAt.Equal(list[i].FinishedAt) {
+				out[list[j].Key] = last
+				j++
+			}
+			for _, r := range list[i:j] {
+				if r.Status == provider.DeploySucceeded {
+					last = r
+					break
+				}
+			}
+			i = j
+		}
+	}
+	return out
+}
+
+// RangeOf finds what to compare for one record: from prev, the previous
+// successful deployment of its stream (`Previous`), to it. A revision in
+// another repository is stood in for by the newest release published by then.
+// ok is false when no release stands in.
+func RangeOf(r Record, prev *Record, releases []provider.Release) (Range, bool) {
 	revision := func(x Record) (string, bool) {
 		if !x.Elsewhere {
 			return x.Revision, true
@@ -216,12 +254,6 @@ func RangeOf(r Record, records []Record, releases []provider.Release) (Range, bo
 	head, ok := revision(r)
 	if !ok {
 		return Range{}, false
-	}
-	var prev *Record
-	for i, x := range records {
-		if x.Key != r.Key && x.Stream() == r.Stream() && x.Status == provider.DeploySucceeded && x.FinishedAt.Before(r.FinishedAt) && (prev == nil || x.FinishedAt.After(prev.FinishedAt)) {
-			prev = &records[i]
-		}
 	}
 	if prev == nil {
 		return Range{Head: head}, true

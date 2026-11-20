@@ -43,3 +43,14 @@ func TestProbePathOutsideTheRootFails(t *testing.T) {
 		}
 	}
 }
+
+func TestComponentFieldsDefaultToDeployComponent(t *testing.T) {
+	c, err := Parse(env(nil))
+	if err != nil || !reflect.DeepEqual(c.ComponentFields, []string{"deploy_component"}) {
+		t.Fatalf("component fields = %#v, %v", c.ComponentFields, err)
+	}
+	c, err = Parse(env(map[string]string{"DEPLOY_COMPONENT_FIELDS": "component, release_component"}))
+	if err != nil || !reflect.DeepEqual(c.ComponentFields, []string{"component", "release_component"}) {
+		t.Fatalf("component fields = %#v, %v", c.ComponentFields, err)
+	}
+}

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/dsswift/orrery/sdk"
@@ -26,9 +28,16 @@ const window = 200 * 24 * time.Hour
 // (Argo CD syncs, and forge jobs a CI job reports itself) are written.
 const argoScope = "argo-outcomes"
 
-// pushOutcomes works out every deployment's outcome and writes it: forge
-// deployments as entities of their own, Argo CD syncs by enriching the
-// entity another source owns. Only what changed is written.
+// pathReadsPerRepo bounds the changed-file reads made for one repository in
+// one pass, like commitReadsPerRepo.
+const pathReadsPerRepo = 10
+
+// pushOutcomes works out every deployment's outcome and writes it: forge and
+// pipeline deployments as entities of their own, Argo CD syncs by enriching
+// the entity another source owns. Each is placed on its service on every
+// pass, from the deployments kept for the window, so a deployment kept
+// before a rule could place it is placed by the next pass. Only what changed
+// is written.
 func (e *Engine) pushOutcomes(ctx context.Context) {
 	allowed, ok := e.offer.ready(ctx)
 	if !ok || !allowed(catalog.Deployment) {
@@ -45,20 +54,47 @@ func (e *Engine) pushOutcomes(ctx context.Context) {
 
 	var records []outcomes.Record
 	forge := map[string]forgeDeployment{}
+	// settled holds the repositories whose deployments were all read and placed
+	// with nothing left in doubt, so what they no longer make can be removed.
+	settled := map[string]bool{}
+	placed := outcomes.Placed{}
 	for _, k := range keys {
 		kept, err := state.Deployments[forgeDeployment](ctx, e.o.Store, k)
 		if err != nil {
 			e.o.Log.WarnContext(ctx, "kept deployments unreadable", "repo", k, "error", err)
 			continue
 		}
+		t := e.get(k)
+		var own []outcomes.Record
+		dropped := 0
 		for _, d := range kept {
 			if now.Sub(d.FinishedAt) > window {
 				continue
 			}
+			if d.Source == pipelineSource && !declaresPipeline(t, d.Service) {
+				dropped++
+				continue
+			}
+			d.Record.Job = d.Deployment.Job
 			forge[d.Key] = d
-			records = append(records, d.Record)
+			own = append(own, d.Record)
 		}
+		if dropped > 0 {
+			e.o.Log.InfoContext(ctx, "pipeline deployments left out; their service no longer deploys by a pipeline", "repo", k, "deployments", dropped)
+		}
+		var targets []outcomes.Target
+		if t != nil {
+			targets = e.targets(k, t.found)
+		}
+		paths, doubt := e.pathsOf(ctx, t, k)
+		list, counts := outcomes.Attribute(own, targets, paths)
+		for why, n := range counts {
+			placed[why] += n
+		}
+		records = append(records, list...)
+		settled[k] = t != nil && t.found != nil && !*doubt
 	}
+	e.o.Log.InfoContext(ctx, "deployments placed on services", "placed", placed)
 	var incidents []outcomes.Incident
 	argo := map[string]bool{}
 	// By the forge job's address, the entity another source keeps for it.
@@ -76,15 +112,18 @@ func (e *Engine) pushOutcomes(ctx context.Context) {
 		if err != nil {
 			e.o.Log.ErrorContext(ctx, "orrery read failed; outcomes count forge deployments alone", "error", err)
 		} else {
-			tracked := func(r outcomes.RepoRef) bool { return e.get(r.Key()) != nil }
-			found, skipped := outcomes.MapSyncs(syncs, apps, workloads, tracked, e.o.GitLabHost)
+			found, skipped := outcomes.MapSyncs(syncs, apps, workloads, e.places(ctx, keys), e.o.GitLabHost)
 			var dropped outcomes.Skipped
 			incidents, dropped = outcomes.MapIncidents(raw, workloads, e.o.GitLabHost)
+			withService := 0
 			for _, r := range found {
 				argo[r.Key] = true
+				if r.Service != "" {
+					withService++
+				}
 			}
 			records = append(records, found...)
-			e.o.Log.InfoContext(ctx, "orrery deployments read", "syncs", len(syncs), "kept", len(found), "skipped", skipped, "incidents", len(incidents), "incidentsSkipped", dropped)
+			e.o.Log.InfoContext(ctx, "orrery deployments read", "syncs", len(syncs), "apps", len(apps), "kept", len(found), "onAService", withService, "skipped", skipped, "incidents", len(incidents), "incidentsSkipped", dropped)
 		}
 	}
 
@@ -93,40 +132,52 @@ func (e *Engine) pushOutcomes(ctx context.Context) {
 
 	byScope := map[string][]sdk.Entity{}
 	var enrich []sdk.Entity
+	made := map[string]bool{}
 	for _, r := range records {
 		o := results[r.Key]
 		t := e.get(r.RepoKey)
-		service := ""
-		if t != nil {
-			service = catalog.DeploymentService(r.RepoKey, t.found, r.Folder)
+		from := r.Key
+		if r.From != "" {
+			from = r.From
+		}
+		d, isForge := forge[from]
+		other := ""
+		if isForge && d.Deployment.URL != "" {
+			other = elsewhere[d.Deployment.URL]
 		}
 		var x sdk.Entity
 		var scope string
-		other := ""
-		if d, ok := forge[r.Key]; ok && d.Deployment.URL != "" {
-			other = elsewhere[d.Deployment.URL]
-		}
-		if other != "" {
+		switch {
+		case other != "" && r.From != "":
+			// Another source keeps this job's one entity; the services past the first go without.
+			continue
+		case other != "":
 			// Another source reports this job: its entity takes the outcome.
 			x = sdk.Entity{Blueprint: catalog.Deployment, Key: other, Fields: o.Fields(), Relations: map[string]any{"repository": r.RepoKey}}
-		} else if argo[r.Key] {
+		case argo[r.Key]:
 			rel := map[string]any{"repository": r.RepoKey}
-			if service != "" {
-				rel["service"] = service
+			if r.Service != "" {
+				rel["service"] = r.Service
 			}
 			x = sdk.Entity{Blueprint: catalog.Deployment, Key: r.Key, Fields: o.Fields(), Relations: rel}
-		} else {
-			d, ok := forge[r.Key]
-			if !ok || t == nil {
+		default:
+			if !isForge || t == nil {
 				continue
 			}
 			name := r.RepoKey
 			if t.repo != nil {
 				name = t.repo.Name
 			}
-			x = catalog.DeploymentEntity(r.RepoKey, name, service, d.Deployment, o)
+			if r.Folder != "" {
+				name += " / " + r.Folder
+			}
+			dep := d.Deployment
+			finished := r.FinishedAt
+			dep.Status, dep.FinishedAt = r.Status, &finished
+			x = catalog.DeploymentEntity(r.Key, r.RepoKey, name+" to "+r.Environment, r.Service, dep, o)
 			scope = accountScope(t.account) + "/deployments"
 		}
+		made[x.Key] = true
 		if _, changed := e.changed(ctx, x); !changed {
 			continue
 		}
@@ -140,8 +191,163 @@ func (e *Engine) pushOutcomes(ctx context.Context) {
 		e.runRemembered(ctx, scope, list)
 	}
 	e.runRemembered(ctx, argoScope, enrich, sdk.EnrichOnly())
+	e.dropUnmade(ctx, made, settled)
 	e.o.Log.InfoContext(ctx, "outcomes written", "deployments", len(records), "argo", len(argo), "incidents", len(incidents), "enriched", len(enrich))
 	span.End()
+}
+
+// declaresPipeline says whether a tracked repository's service still says it
+// deploys by a pipeline. Until its services are read, it is taken at its word.
+func declaresPipeline(t *tracked, service string) bool {
+	if t == nil || t.found == nil {
+		return true
+	}
+	d := t.found.Describing(service)
+	return d != nil && d.Deploys != nil && d.Deploys.Pipeline != ""
+}
+
+// pathsOf answers the files a range of one repository changed: from the
+// state, or once from its forge, a bounded number per pass. doubt is set when
+// a read failed, so a deployment it would have placed is not taken as unplaced.
+func (e *Engine) pathsOf(ctx context.Context, t *tracked, repoKey string) (outcomes.PathsOf, *bool) {
+	budget := pathReadsPerRepo
+	doubt := new(bool)
+	return func(rng outcomes.Range) []string {
+		kept, err := e.o.Store.Paths(ctx, repoKey, rng.Base, rng.Head)
+		if err != nil {
+			*doubt = true
+			e.o.Log.WarnContext(ctx, "kept changed files unreadable", "repo", repoKey, "error", err)
+			return nil
+		}
+		if kept != nil {
+			return kept
+		}
+		if t == nil || t.repo == nil {
+			return nil
+		}
+		if budget == 0 {
+			*doubt = true
+			return nil
+		}
+		budget--
+		got, err := e.provider(t.account.Provider).PathsBetween(ctx, t.account, t.repo, rng.Base, rng.Head)
+		if err != nil {
+			*doubt = true
+			e.o.Log.WarnContext(ctx, "changed files could not be read; tried again next pass", "repo", t.repo.FullName, "base", rng.Base, "head", rng.Head, "error", err)
+			return nil
+		}
+		if got == nil {
+			e.o.Log.InfoContext(ctx, "changed files unknown; the deployment is not placed by them", "repo", t.repo.FullName, "base", rng.Base, "head", rng.Head)
+			got = []string{}
+		}
+		if err := e.o.Store.PutPaths(ctx, repoKey, rng.Base, rng.Head, got, time.Now()); err != nil {
+			e.o.Log.WarnContext(ctx, "changed files not kept", "repo", t.repo.FullName, "error", err)
+		}
+		return got
+	}, doubt
+}
+
+// places is what places Argo CD syncs: the sources each tracked service's
+// orrery.yaml names, and each tracked repository's services.
+func (e *Engine) places(ctx context.Context, keys []string) outcomes.Places {
+	var declared []outcomes.Declared
+	for _, k := range keys {
+		t := e.get(k)
+		if t == nil || t.found == nil {
+			continue
+		}
+		targets := e.targets(k, t.found)
+		for _, d := range t.found.Descriptions {
+			if d.Deploys == nil {
+				continue
+			}
+			for _, src := range d.Deploys.ArgoCD {
+				ref, ok := outcomes.ParseRepoURL(src, e.o.GitLabHost)
+				if !ok {
+					e.o.Log.WarnContext(ctx, "orrery.yaml names an Argo CD source that is no repository; left out", "repo", k, "service", d.Service, "source", src)
+					continue
+				}
+				for _, target := range targets {
+					if target.Key == d.Service {
+						declared = append(declared, outcomes.Declared{Source: ref, RepoKey: k, Target: target})
+					}
+				}
+			}
+		}
+	}
+	return outcomes.Places{Declared: declared, Targets: func(key string) []outcomes.Target {
+		t := e.get(key)
+		if t == nil {
+			return nil
+		}
+		return e.targets(key, t.found)
+	}}
+}
+
+// dropUnmade deletes the deployments redgreen made under a key of its own
+// shape (`<key>@<service>`, `<service>@run-<id>`) that this pass did not make
+// again: a service gone from a deployment, or a service that stopped
+// deploying by its pipeline. Only a repository whose deployments were all
+// read and placed is judged, so a failed read deletes nothing.
+func (e *Engine) dropUnmade(ctx context.Context, made, settled map[string]bool) {
+	written, err := e.o.Store.WrittenKeys(ctx, catalog.Deployment, "@")
+	if err != nil {
+		e.o.Log.WarnContext(ctx, "written deployments unreadable; none removed this pass", "error", err)
+		return
+	}
+	var gone []string
+	for _, key := range written {
+		if made[key] {
+			continue
+		}
+		if owner := ownerOf(key, settled); owner != "" && settled[owner] && ownShape(key, owner) {
+			gone = append(gone, key)
+		}
+	}
+	if len(gone) == 0 {
+		return
+	}
+	deleted := 0
+	for _, key := range gone {
+		var missing *sdk.APIError
+		if err := e.o.Push.Delete(ctx, catalog.Deployment, key); err != nil && !(errors.As(err, &missing) && missing.Status == http.StatusNotFound) {
+			e.o.Log.WarnContext(ctx, "deployment no longer made not deleted; tried again next pass", "deployment", key, "error", err)
+			continue
+		}
+		if err := e.o.Store.DeleteWritten(ctx, catalog.Deployment, key); err != nil {
+			e.o.Log.WarnContext(ctx, "deleted deployment not forgotten", "deployment", key, "error", err)
+		}
+		deleted++
+	}
+	e.o.Log.InfoContext(ctx, "deployments no longer made deleted", "deleted", deleted, "of", len(gone))
+}
+
+// ownShape says whether a key under repo is one redgreen makes: a service's
+// pipeline deployment, `<service>@run-<id>`, or a forge deployment's record
+// for a service past its first, `<repo>/<id>@<folder>`. Another source's key
+// that redgreen enriched is never one.
+func ownShape(key, repo string) bool {
+	rest := key[len(repo):]
+	if strings.HasPrefix(rest, "@run-") {
+		return true
+	}
+	id, after, ok := strings.Cut(strings.TrimPrefix(rest, "/"), "@")
+	if !ok || !strings.HasPrefix(rest, "/") {
+		return false
+	}
+	return strings.HasPrefix(after, "run-") || (id != "" && !strings.Contains(id, "/"))
+}
+
+// ownerOf is the repository a key of redgreen's own shape is under: the
+// longest repository key it starts with, followed by "/" or "@".
+func ownerOf(key string, repos map[string]bool) string {
+	best := ""
+	for repo := range repos {
+		if len(repo) > len(best) && (strings.HasPrefix(key, repo+"/") || strings.HasPrefix(key, repo+"@")) {
+			best = repo
+		}
+	}
+	return best
 }
 
 // dropCopies deletes redgreen's own entities for forge jobs another source
@@ -201,9 +407,13 @@ func (e *Engine) runRemembered(ctx context.Context, scope string, list []sdk.Ent
 }
 
 // carried reads what each deployment carried: from the state, or once
-// through the forge's compare, a bounded number per repository per pass.
+// through the forge's compare, a bounded number per repository per pass. A
+// kept range whose base is no longer the stream's previous deployment, as
+// when a deployment was placed on its service after it was read, is read
+// again within the same bound.
 func (e *Engine) carried(ctx context.Context, records []outcomes.Record) map[string]*outcomes.Carried {
 	out := map[string]*outcomes.Carried{}
+	prev := outcomes.Previous(records)
 	byRepo := map[string][]outcomes.Record{}
 	for _, r := range records {
 		byRepo[r.RepoKey] = append(byRepo[r.RepoKey], r)
@@ -211,22 +421,31 @@ func (e *Engine) carried(ctx context.Context, records []outcomes.Record) map[str
 	for key, list := range byRepo {
 		t := e.get(key)
 		budget := commitReadsPerRepo
+		// The newest first, so the budget reaches the recent windows first.
+		sort.SliceStable(list, func(i, j int) bool { return list[i].FinishedAt.After(list[j].FinishedAt) })
 		for _, r := range list {
 			kept, err := e.o.Store.Commits(ctx, r.Key)
 			if err != nil {
 				continue
 			}
+			var rng outcomes.Range
+			known := false
+			if t != nil && t.repo != nil {
+				rng, known = outcomes.RangeOf(r, prev[r.Key], t.repo.Releases)
+			}
 			if kept != nil {
 				var c outcomes.Carried
-				if json.Unmarshal(kept.Facts, &c) == nil {
+				ok := json.Unmarshal(kept.Facts, &c) == nil
+				moved := known && rng.Base != "" && rng.Base != kept.Base
+				if ok && (!moved || budget == 0) {
 					out[r.Key] = &c
+					continue
 				}
-				continue
 			}
 			if t == nil || t.repo == nil || budget == 0 {
 				continue
 			}
-			c, err := e.read(ctx, t, r, list)
+			c, err := e.read(ctx, t, r, rng, known)
 			if err != nil {
 				e.o.Log.WarnContext(ctx, "commits between revisions could not be read; tried again next pass", "repo", key, "deployment", r.Key, "error", err)
 				continue
@@ -241,10 +460,9 @@ func (e *Engine) carried(ctx context.Context, records []outcomes.Record) map[str
 	return out
 }
 
-// read finds the range a deployment carried and reads it from its forge.
-func (e *Engine) read(ctx context.Context, t *tracked, r outcomes.Record, stream []outcomes.Record) (*outcomes.Carried, error) {
-	rng, ok := outcomes.RangeOf(r, stream, t.repo.Releases)
-	if !ok {
+// read reads the range a deployment carried from its forge.
+func (e *Engine) read(ctx context.Context, t *tracked, r outcomes.Record, rng outcomes.Range, known bool) (*outcomes.Carried, error) {
+	if !known {
 		e.o.Log.InfoContext(ctx, "deployment carries no known release; its commits stay unknown", "repo", t.repo.FullName, "deployment", r.Key)
 		return &outcomes.Carried{Unknown: true}, nil
 	}

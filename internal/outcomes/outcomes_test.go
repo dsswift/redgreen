@@ -108,20 +108,38 @@ func TestStreamsStayApart(t *testing.T) {
 
 func TestRangeOf(t *testing.T) {
 	records := []Record{rec("a", "succeeded", 0), rec("b", "failed", 1), rec("c", "succeeded", 2)}
-	if r, ok := RangeOf(records[2], records, nil); !ok || r != (Range{Base: "a", Head: "c"}) {
+	prev := Previous(records)
+	if r, ok := RangeOf(records[2], prev["c"], nil); !ok || r != (Range{Base: "a", Head: "c"}) {
 		t.Errorf("range = %+v; a failed deployment is never the base", r)
 	}
-	if r, _ := RangeOf(records[0], records, nil); r != (Range{Head: "a"}) {
+	if r, _ := RangeOf(records[0], prev["a"], nil); r != (Range{Head: "a"}) {
 		t.Errorf("the first of a stream has no base: %+v", r)
 	}
 	manifest := rec("m", "succeeded", 10)
 	manifest.Elsewhere = true
 	releases := []provider.Release{{Tag: "v2", PublishedAt: h(9)}, {Tag: "v3-rc", PublishedAt: h(9.5), Prerelease: true}, {Tag: "v1", PublishedAt: h(-5)}, {Tag: "v9", PublishedAt: h(20)}}
-	if r, ok := RangeOf(manifest, []Record{manifest}, releases); !ok || r.Head != "v2" {
+	if r, ok := RangeOf(manifest, nil, releases); !ok || r.Head != "v2" {
 		t.Errorf("a manifest revision stands in as the newest full release by then: %+v", r)
 	}
-	if _, ok := RangeOf(manifest, []Record{manifest}, nil); ok {
+	if _, ok := RangeOf(manifest, nil, nil); ok {
 		t.Error("with no release to stand in, the range is unknown")
+	}
+}
+
+func TestPreviousKeepsStreamsAndMomentsApart(t *testing.T) {
+	billing := rec("x", "succeeded", 1)
+	billing.Folder = "services/billing"
+	same := rec("b2", "succeeded", 2)
+	records := []Record{rec("a", "succeeded", 0), billing, rec("b1", "succeeded", 2), same, rec("c", "succeeded", 3)}
+	prev := Previous(records)
+	if prev["a"] != nil || prev["x"] != nil {
+		t.Errorf("a stream's first has none: %v %v", prev["a"], prev["x"])
+	}
+	if prev["b1"] == nil || prev["b1"].Key != "a" || prev["b2"] == nil || prev["b2"].Key != "a" {
+		t.Errorf("two that ended at one moment are not each other's: %v %v", prev["b1"], prev["b2"])
+	}
+	if prev["c"] == nil || prev["c"].Key != "b1" {
+		t.Errorf("c follows %v", prev["c"])
 	}
 }
 
@@ -161,9 +179,9 @@ func TestMapSyncsSaysWhyEachWasLeftOut(t *testing.T) {
 		}
 		return d
 	}
-	app := func(key, repo, workload, env string) HubApp {
+	app := func(key, repo, path, workload, env string) HubApp {
 		var a HubApp
-		a.Key, a.Fields.RepoURL = key, repo
+		a.Key, a.Fields.RepoURL, a.Fields.Path = key, repo, path
 		if workload != "" {
 			a.Relations.Workload = []related{{Key: workload}}
 		}
@@ -178,11 +196,15 @@ func TestMapSyncsSaysWhyEachWasLeftOut(t *testing.T) {
 		return w
 	}
 	apps := []HubApp{
-		app("home/argocd/redgreen", "https://github.com/acme/platform", "redgreen", "production"),
-		app("home/argocd/portal", "https://github.com/acme/platform", "portal", ""),
-		app("home/argocd/cert-manager", "https://charts.jetstack.io", "", ""),
-		app("home/argocd/vaultwarden", "https://github.com/acme/platform", "vaultwarden", ""),
-		app("home/argocd/petri", "https://github.com/acme/platform", "petri", ""),
+		app("home/argocd/redgreen", "https://github.com/acme/platform", "workloads/redgreen", "redgreen", "production"),
+		app("home/argocd/portal", "https://github.com/acme/platform", "workloads/portal", "portal", ""),
+		app("home/argocd/cert-manager", "https://charts.jetstack.io", "", "", ""),
+		app("home/argocd/vaultwarden", "https://github.com/acme/platform", "workloads/vaultwarden", "vaultwarden", ""),
+		app("home/argocd/petri", "https://github.com/acme/platform", "workloads/petri", "petri", ""),
+		app("home/argocd/shop", "https://github.com/acme/platform", "workloads/shop/prod", "", ""),
+		app("home/argocd/orders", "https://github.com/acme/orders", "deploy", "", ""),
+		app("home/argocd/twice", "https://github.com/acme/platform", "workloads/twice", "", ""),
+		app("home/argocd/gone", "https://github.com/acme/platform", "workloads/gone", "nowhere", ""),
 	}
 	workloads := []HubWorkload{
 		workload("redgreen", "https://github.com/dsswift/redgreen"),
@@ -190,23 +212,95 @@ func TestMapSyncsSaysWhyEachWasLeftOut(t *testing.T) {
 		workload("vaultwarden", ""),
 		workload("petri", "https://github.com/dsswift/petri"),
 	}
-	tracked := func(r RepoRef) bool {
-		return r.Key() == "github/dsswift/redgreen" || r.Key() == "github/acme/platform"
+	targets := map[string][]Target{
+		"github/dsswift/redgreen": {{Key: "github/dsswift/redgreen"}},
+		"github/acme/platform":    {{Key: "github/acme/platform"}, {Key: "github/acme/platform/workloads/portal", Path: "workloads/portal"}},
+		"github/acme/orders":      {{Key: "github/acme/orders"}, {Key: "github/acme/orders/deploy", Path: "deploy"}},
+		"github/acme/shop":        {{Key: "github/acme/shop"}},
+	}
+	shopSource, _ := ParseRepoURL("https://github.com/acme/platform/tree/main/workloads/shop", "")
+	twiceSource, _ := ParseRepoURL("https://github.com/acme/platform/tree/main/workloads/twice", "")
+	places := Places{
+		Declared: []Declared{
+			{Source: shopSource, RepoKey: "github/acme/shop", Target: Target{Key: "github/acme/shop"}},
+			{Source: twiceSource, RepoKey: "github/acme/shop", Target: Target{Key: "github/acme/shop"}},
+			{Source: twiceSource, RepoKey: "github/dsswift/redgreen", Target: Target{Key: "github/dsswift/redgreen"}},
+		},
+		Targets: func(key string) []Target { return targets[key] },
 	}
 	at := "2026-10-30T10:00:05Z"
 	got, skipped := MapSyncs([]HubDeployment{
 		sync("home/argocd/redgreen/3", "home/argocd/redgreen", "succeeded", at),
 		sync("home/argocd/portal/9", "home/argocd/portal", "failed", at),
+		sync("home/argocd/shop/1", "home/argocd/shop", "succeeded", at),
+		sync("home/argocd/orders/1", "home/argocd/orders", "succeeded", at),
 		sync("a", "home/argocd/cert-manager", "succeeded", at),
 		sync("b", "home/argocd/vaultwarden", "succeeded", at),
 		sync("c", "home/argocd/petri", "succeeded", at),
 		sync("d", "home/argocd/redgreen", "succeeded", ""),
 		sync("e", "", "succeeded", at),
-	}, apps, workloads, tracked, "gitlab.com")
-	if len(got) != 2 || got[0].RepoKey != "github/dsswift/redgreen" || !got[0].Elsewhere || got[1].Folder != "workloads/portal" || got[1].Elsewhere || got[1].Environment != "production" {
-		t.Errorf("records = %+v", got)
+		sync("f", "home/argocd/twice", "succeeded", at),
+		sync("g", "home/argocd/gone", "succeeded", at),
+	}, apps, workloads, places, "gitlab.com")
+	type row struct {
+		key, repo, folder, service, env string
+		elsewhere                       bool
 	}
-	if want := (Skipped{"no_app": 1, "no_workload": 1, "no_repo_url": 1, "repo_not_tracked": 1, "unfinished": 1}); !reflect.DeepEqual(skipped, want) {
+	var rows []row
+	for _, r := range got {
+		rows = append(rows, row{r.Key, r.RepoKey, r.Folder, r.Service, r.Environment, r.Elsewhere})
+	}
+	want := []row{
+		{"home/argocd/redgreen/3", "github/dsswift/redgreen", "", "github/dsswift/redgreen", "production", true},
+		{"home/argocd/portal/9", "github/acme/platform", "workloads/portal", "github/acme/platform/workloads/portal", "production", false},
+		{"home/argocd/shop/1", "github/acme/shop", "", "github/acme/shop", "production", true},
+		{"home/argocd/orders/1", "github/acme/orders", "deploy", "github/acme/orders/deploy", "production", false},
+	}
+	if !reflect.DeepEqual(rows, want) {
+		t.Errorf("records = %+v\nwant %+v", rows, want)
+	}
+	if want := (Skipped{"no_app": 1, "unplaced": 1, "no_repo_url": 1, "repo_not_tracked": 1, "unfinished": 1, "ambiguous": 1, "no_workload": 1}); !reflect.DeepEqual(skipped, want) {
 		t.Errorf("skipped = %v, want %v", skipped, want)
+	}
+}
+
+func TestAttributeByNamePrefersTheLongerComponent(t *testing.T) {
+	repo := "gitlab/acme/erp"
+	targets := []Target{{Key: repo + "/ad", Path: "ad", Components: []string{"activedirectory"}}, {Key: repo + "/adapi", Path: "adapi", Components: []string{"activedirectory-api"}},
+		{Key: repo + "/web", Path: "web", Components: []string{"web--beta"}}, {Key: repo + "/webapp", Path: "webapp", Components: []string{"webapp"}}}
+	r := func(key, env, job string) Record {
+		return Record{Key: repo + "/" + key, Source: "forge", RepoKey: repo, Environment: env, Job: job, Status: "succeeded", Revision: key, FinishedAt: t0}
+	}
+	got, placed := Attribute([]Record{
+		r("1", "production", "deploy/deploy-activedirectory-api"),
+		r("2", "production", "deploy/activedirectory:deploy"),
+		r("3", "production", "deploy/web--beta"),
+		r("4", "webapp", ""),
+		r("5", "production", "deploy/webapplication"),
+	}, targets, func(Range) []string { return nil })
+	services := map[string]string{}
+	for _, x := range got {
+		services[x.Key] = x.Service
+	}
+	want := map[string]string{repo + "/1": repo + "/adapi", repo + "/2": repo + "/ad", repo + "/3": repo + "/web", repo + "/4": repo + "/webapp", repo + "/5": ""}
+	if !reflect.DeepEqual(services, want) {
+		t.Errorf("services = %v\nwant %v", services, want)
+	}
+	if placed["named"] != 4 || placed["unplaced"] != 1 {
+		t.Errorf("placed = %v", placed)
+	}
+}
+
+func TestAttributeLeavesARootServiceItsOwnFilesOnly(t *testing.T) {
+	repo := "github/acme/site"
+	targets := []Target{{Key: repo, Path: ""}, {Key: repo + "/api", Path: "api"}}
+	r := Record{Key: repo + "/1", Source: "forge", RepoKey: repo, Environment: "production", Status: "succeeded", Revision: "r1", FinishedAt: t0}
+	got, _ := Attribute([]Record{r}, targets, func(Range) []string { return []string{"api/main.go", "api/v2/routes.go"} })
+	if len(got) != 1 || got[0].Service != repo+"/api" || got[0].Folder != "api" {
+		t.Errorf("files only in api placed %+v; the deepest folder holds a file", got)
+	}
+	got, _ = Attribute([]Record{r}, targets, func(Range) []string { return []string{"README.md", "API/main.go"} })
+	if len(got) != 2 || got[0].Service != repo || got[1].Service != repo+"/api" || got[1].Key != repo+"/1@api" || got[1].From != repo+"/1" {
+		t.Errorf("files in both placed %+v", got)
 	}
 }

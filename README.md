@@ -18,7 +18,7 @@ that can be rebuilt by one sweep.
 | `sw_pipeline` | inventory | one per workflow, build definition, or schedule: the latest default-branch run, schedule state, newest release build, 30-day success rate, median duration, a 60-day success trend, and a flaky flag. Runs stay on the forge. |
 | `sw_service` | inventory | each service found from the files that build it (folder, kind, language, icon, last human change, README, Dockerfile, tests), and its DORA measures. The one a repository's `orrery.yaml` describes also carries its logo, the APIs it calls (`consumes`, `will_consume`), and the fields and relations that place it in the estate's scheme. |
 | `sw_api` | inventory | each API a repository's `orrery.yaml` says its service provides: kind, description, and where its definition is read |
-| `sw_deployment` | history, kept 180 days | each deployment a forge recorded, with lead time, commits carried, fix only, failed change, and restore time. Argo CD syncs another source writes get the same fields added, and so does a forge job another source already reports by its address: that source's entity is the deployment, and redgreen keeps no copy of its own. |
+| `sw_deployment` | history, kept 180 days | each deployment a forge recorded, one per service it rolled out, and each one a service's pipeline made where its orrery.yaml says so, with lead time, commits carried, fix only, failed change, and restore time. Argo CD syncs another source writes get the same fields and their service added, and so does a forge job another source already reports by its address: that source's entity is the deployment, and redgreen keeps no copy of its own. |
 | `sw_issue` | record, kept 90 days after closing | open issues and pull requests on every forge, linked to their repository |
 | `sw_connection` | inventory | each host a service's config files name, per environment: host, resource name, database, kind, and the setting names, with evidence `code`. Names only, never a value. |
 | `team` | fields only | the same DORA measures over a team's services, through the standard's `sw_service.team` |
@@ -38,6 +38,35 @@ because each write replaces what redgreen wrote before. Where the hub lacks
 one of its names, the service is written again without its place and stands
 without it. A file that cannot be used is logged and left
 out; the services still stand.
+
+### How a service says it deploys
+
+A service whose deployments the forge does not tie to it says so in its
+`orrery.yaml`, under `deploys`:
+
+```yaml
+service: gitlab/acme/jobs/pusher
+deploys:
+  pipeline: .gitlab-ci.yml       # its successful default-branch or tag runs are its deployments
+  environment: production        # where they deploy; production when left out
+  argocd:                        # the sources of the Argo CD apps that deploy it
+  - https://gitlab.example.com/ops/gitops/-/tree/main/apps/pusher
+```
+
+- `pipeline` is for a service whose pipeline deploys it without a forge
+  environment: a scheduled job's code, a data pusher, an infrastructure
+  project. Each revision's first run of that pipeline file that succeeded on
+  the default branch, or for a tag or a release, is one deployment, keyed
+  `<service>@run-<run id>`. A scheduled run, a pull request's, another
+  branch's, a rerun, and a failed run are none: a scheduled run ships no
+  change, and a failed run is a broken build more often than a broken
+  environment. Runs are kept 60 days, so the deployments start from there,
+  and are kept like the forge's own after that. Leave it out for a service
+  whose forge records its deployments, or each counts twice.
+- `argocd` names, by browser URL, the repository and folder an Argo CD app
+  reads its manifests from. An app whose source is that folder or under it
+  is this service's. The longest source named wins; two services naming the
+  same one place neither.
 
 ### What a service's config files say it reaches
 
@@ -110,13 +139,46 @@ deployments around it:
 
 - `lead_time_hours`: the median hours from each carried commit's authoring to
   the end of the deployment. The commits come from the forge's compare, from
-  the last good deployment of the same stream (repository, folder,
-  environment), read once.
+  the last good deployment of the same stream (repository, service folder,
+  environment), read once, and again when that last good deployment changes,
+  as when a deployment is placed on its service after it was read.
 - `fix_only`: every carried commit is a `fix`, a `revert`, or a forge's revert.
 - `failed_change`: it failed, a fix-only deployment followed within a day, or
   a critical or warning `it_incident` opened on its workload within a day.
 - `restore_hours`: to the next good deployment, the fix, or the incident's
   `mitigated_at`, else its `resolved_at`.
+
+A deployment is placed on the service it rolled out from the strongest
+signal there is, on every pass over the deployments kept for the window, so
+one kept before a rule could place it is placed by the next pass:
+
+1. The repository holds one service: that one.
+2. The environment or the job names a service's component: the value of
+   one of the `DEPLOY_COMPONENT_FIELDS` in the service's orrery.yaml
+   `fields`, as a whole word (`deploy:orders`, `orders-production`). A
+   component inside a longer one that also matched is the longer one's.
+3. The files changed since the environment last took another revision sit
+   in services' folders, each file held by the deepest folder it is in. A
+   forge that runs one job per service for one revision does not say which
+   job is whose, so that revision's unnamed deployments to one environment
+   are taken together: the first carries every service its changes touched
+   that no named job claimed, failed if any of them failed; the rest stay
+   unplaced.
+
+A deployment of several services is one record per service, so each
+service's DORA counts its own deliveries and each service's stream has its
+own previous deployment, failures, and restores. The first service by key
+keeps the forge deployment's key; each other is keyed `<key>@<service
+folder>`, and deleted when the deployment no longer reaches it. What nothing
+places stays without a service. A repository with several services no
+longer gives every deployment to its root service: the root gets the ones
+whose name or changed files point at it.
+
+An Argo CD sync is placed by the source a service's orrery.yaml names
+(`deploys.argocd`), else by its app's workload, else by its app's source
+when that sits inside a service's own folder in a watched repository. A
+repository's root holds every folder, so a source at a root is no evidence:
+a root service is placed only by naming the source.
 
 A deployment is what a forge records against an environment. On GitHub and
 GitLab that is a deployment. On Azure DevOps it is each job a pipeline ran
@@ -141,6 +203,7 @@ redgreen serve
 | `SYNC_INTERVAL_MINUTES` | Minutes between sweeps, 5. |
 | `SYNC_CONCURRENCY` | Repositories read at once, 4. |
 | `BOT_AUTHORS` | More commit authors that count as automation, comma separated. |
+| `DEPLOY_COMPONENT_FIELDS` | The orrery.yaml `fields` whose value names a service in its deployments' environments and job names, comma separated: `deploy_component`. |
 | `PROBE_PATHS` | Files or folders to look for in every repository, from its root, comma separated: `docs/notes,docs/guides`. Each repository's `paths_present` lists the ones its default branch holds, empty when it holds none, and stays unset when this is empty. It reads the file tree redgreen already lists for services, so it costs no extra calls. A tree GitHub cuts short leaves `paths_present` unset, since a missing path may still be there. |
 | `FLAKY_WINDOW_RUNS`, `FLAKY_CLEAR_RUNS`, `FLAKY_MAX_AGE_DAYS` | The flaky rule: finished runs read, 20; passes in a row that clear it, 5; days evidence counts, 180. |
 | `ORRERY_URL` | The hub's machine surface. |
