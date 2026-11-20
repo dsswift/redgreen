@@ -1,6 +1,7 @@
 package outcomes
 
 import (
+	"path"
 	"sort"
 	"strings"
 	"time"
@@ -22,10 +23,11 @@ type Target struct {
 // they are not known.
 type PathsOf func(Range) []string
 
-// Placed counts how a repository's deployments found their services: "only"
-// (the repository holds one), "named" (the environment or the job names a
-// component), "paths" (the changed files sit in the services' folders),
-// "declared" (placed before, by what the service says), and "unplaced".
+// Placed counts deployments by what placed them on their services. For a
+// repository's own (Attribute): "only" (the repository holds one), "named"
+// (the environment or the job names a component), "paths" (the changed
+// files sit in the services' folders), "declared" (placed before, by what
+// the service says), and "unplaced". For Argo CD syncs, Mapping says.
 type Placed map[string]int
 
 // Attribute places each deployment of one repository on the service it
@@ -266,6 +268,278 @@ func lastOther(succeeded []Record, group []Record) string {
 		}
 	}
 	return ""
+}
+
+// Places is what places an Argo CD app's syncs in a repository and on one
+// of its services.
+type Places struct {
+	// Linked are the links the operator who runs redgreen declares in its
+	// own settings (ARGOCD_SERVICES): an app by its key or name, or a source.
+	Linked []Declared
+	// Declared are the Argo CD sources services name in their orrery.yaml.
+	Declared []Declared
+	// Targets are a tracked repository's services, by its key; nil for a
+	// repository redgreen does not watch.
+	Targets func(repoKey string) []Target
+}
+
+// Declared is one app or source a service is said to be deployed by.
+type Declared struct {
+	// From is the words that said so, as written.
+	From string
+	// App is an Argo CD app's key on the hub, or its name, the key's last
+	// part, which names every app so called; "" when Source says it.
+	App     string
+	Source  RepoRef
+	RepoKey string
+	Target  Target
+}
+
+// Mapping is how the syncs were placed, and why the rest were left out.
+type Mapping struct {
+	// Placed counts the syncs by what placed them: "linked", "declared",
+	// "workload", or "folder".
+	Placed  Placed
+	Skipped Skipped
+	// Conflicts are the apps a link places on another service than the one
+	// whose orrery.yaml names its source. The link wins.
+	Conflicts []Conflict
+	// Unmatched are the links, as written, that name no app the hub holds.
+	Unmatched []string
+}
+
+// Conflict is an app a link and a service's orrery.yaml place apart.
+type Conflict struct {
+	App, Linked, Declared string
+}
+
+// MapSyncs turns the hub's Argo CD syncs into records of the repositories
+// redgreen watches, each placed from the strongest signal there is:
+//
+//  1. Someone says which service the app deploys. The operator's link names
+//     the app, by key, then by name, or the source its manifests are read
+//     from; a service's orrery.yaml names that source. The longest source
+//     named wins; two links or two services naming the same one place
+//     neither. Where a link and an orrery.yaml disagree, the link wins: the
+//     operator runs this estate, and a service's file is written once for
+//     every estate that runs it.
+//  2. The app's workload names its repository and folder: the service in
+//     that folder, or the repository's only one.
+//  3. The app's source sits in a watched repository, inside a service's
+//     own folder: that service. A repository's root holds every folder, so
+//     it is no evidence, and a root service is placed only by naming it.
+//
+// A sync's revision is the manifests' commit; where they are kept in another
+// repository than the service's, its release tags stand in (`Elsewhere`).
+func MapSyncs(syncs []HubDeployment, apps []HubApp, workloads []HubWorkload, places Places, gitlabHost string) ([]Record, Mapping) {
+	appBy := map[string]HubApp{}
+	sources := map[string]RepoRef{}
+	for _, a := range apps {
+		appBy[a.Key] = a
+		if source, ok := appSource(a, gitlabHost); ok {
+			sources[a.Key] = source
+		}
+	}
+	workloadBy := map[string]HubWorkload{}
+	for _, w := range workloads {
+		workloadBy[w.Key] = w
+	}
+	m := Mapping{Placed: Placed{}, Skipped: Skipped{}, Unmatched: unmatched(places.Linked, apps, sources)}
+	conflicts := map[string]Conflict{}
+	var out []Record
+	for _, d := range syncs {
+		at, err := time.Parse(time.RFC3339, d.Fields.DeployedAt)
+		if (d.Fields.Status != "succeeded" && d.Fields.Status != "failed") || err != nil || d.Fields.Revision == "" {
+			m.Skipped["unfinished"]++
+			continue
+		}
+		if len(d.Relations.App) == 0 {
+			m.Skipped["no_app"]++
+			continue
+		}
+		app, ok := appBy[d.Relations.App[0].Key]
+		if !ok {
+			m.Skipped["no_app"]++
+			continue
+		}
+		env := "production"
+		if len(app.Relations.Environment) > 0 {
+			env = app.Relations.Environment[0].Key
+		}
+		source, sourced := sources[app.Key]
+		r := Record{Key: d.Key, Source: "argo", Environment: env, Status: d.Fields.Status, Revision: d.Fields.Revision, FinishedAt: at}
+		link, linkAmbiguous := linkedFor(app.Key, source, sourced, places.Linked)
+		var own *Declared
+		ownAmbiguous := false
+		if sourced {
+			own, ownAmbiguous = declaredFor(source, places.Declared)
+		}
+		said, how := link, "linked"
+		switch {
+		case link != nil:
+			if own != nil && own.Target.Key != link.Target.Key {
+				conflicts[app.Key] = Conflict{App: app.Key, Linked: link.Target.Key, Declared: own.Target.Key}
+			}
+		case linkAmbiguous || ownAmbiguous:
+			m.Skipped["ambiguous"]++
+			continue
+		default:
+			said, how = own, "declared"
+		}
+		if said != nil {
+			r.RepoKey, r.Folder, r.Service = said.RepoKey, said.Target.Path, said.Target.Key
+			r.Elsewhere = !sourced || !strings.EqualFold(source.Key(), said.RepoKey)
+			m.Placed[how]++
+			out = append(out, r)
+			continue
+		}
+		reason := "unplaced"
+		if len(app.Relations.Workload) > 0 {
+			w, ok := workloadBy[app.Relations.Workload[0].Key]
+			ref, parsed := ParseRepoURL(w.Fields.Repo, gitlabHost)
+			targets := places.Targets(ref.Key())
+			switch {
+			case !ok:
+				reason = "no_workload"
+			case !parsed:
+				reason = "no_repo_url"
+			case targets == nil:
+				reason = "repo_not_tracked"
+			default:
+				r.RepoKey, r.Folder, r.Service = ref.Key(), ref.Path, serviceAt(targets, ref.Path)
+				r.Elsewhere = !SameRepo(source, ref)
+				m.Placed["workload"]++
+				out = append(out, r)
+				continue
+			}
+		}
+		if sourced {
+			if t, ok := folderHolding(places.Targets(source.Key()), source.Path); ok {
+				r.RepoKey, r.Folder, r.Service = source.Key(), t.Path, t.Key
+				m.Placed["folder"]++
+				out = append(out, r)
+				continue
+			}
+		}
+		m.Skipped[reason]++
+	}
+	for _, c := range conflicts {
+		m.Conflicts = append(m.Conflicts, c)
+	}
+	sort.Slice(m.Conflicts, func(i, j int) bool { return m.Conflicts[i].App < m.Conflicts[j].App })
+	return out, m
+}
+
+// appSource is the repository and folder an app reads its manifests from.
+func appSource(a HubApp, gitlabHost string) (RepoRef, bool) {
+	source, ok := ParseRepoURL(a.Fields.RepoURL, gitlabHost)
+	if ok && a.Fields.Path != "" {
+		source.Path = strings.TrimPrefix(path.Clean("/"+source.Path+"/"+a.Fields.Path), "/")
+	}
+	return source, ok
+}
+
+// appNamed says whether a link names the app with this key: by the key
+// itself, or by its name, the key's last part.
+func appNamed(link, key string) bool {
+	return strings.EqualFold(link, key) || strings.EqualFold(link, key[strings.LastIndex(key, "/")+1:])
+}
+
+// linkedFor is the operator's link for an app: the one naming its key, else
+// its name, else the longest source holding the app's; ambiguous when two
+// links of that one source name different services.
+func linkedFor(key string, source RepoRef, sourced bool, links []Declared) (*Declared, bool) {
+	var byName *Declared
+	var bySource []Declared
+	for i, l := range links {
+		switch {
+		case l.App == "":
+			bySource = append(bySource, l)
+		case strings.EqualFold(l.App, key):
+			return &links[i], false
+		case appNamed(l.App, key):
+			byName = &links[i]
+		}
+	}
+	if byName != nil || !sourced {
+		return byName, false
+	}
+	return declaredFor(source, bySource)
+}
+
+// unmatched is the links, as written, that name no app the hub holds.
+func unmatched(links []Declared, apps []HubApp, sources map[string]RepoRef) []string {
+	var out []string
+	for _, l := range links {
+		found := false
+		for _, a := range apps {
+			source, sourced := sources[a.Key]
+			if l.App != "" && appNamed(l.App, a.Key) || l.App == "" && sourced && SameRepo(l.Source, source) && under(source.Path, l.Source.Path) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			out = append(out, l.From)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// under says whether folder sits at or below parent, however cased.
+func under(folder, parent string) bool {
+	folder, parent = strings.ToLower(strings.Trim(folder, "/")), strings.ToLower(strings.Trim(parent, "/"))
+	return parent == "" || folder == parent || strings.HasPrefix(folder, parent+"/")
+}
+
+// declaredFor is the service whose named source holds an app's, the longest
+// such source; ambiguous when two services name that one.
+func declaredFor(source RepoRef, declared []Declared) (best *Declared, ambiguous bool) {
+	depth := -1
+	for i, d := range declared {
+		if !SameRepo(d.Source, source) || !under(source.Path, d.Source.Path) {
+			continue
+		}
+		n := len(strings.Trim(d.Source.Path, "/"))
+		switch {
+		case n > depth:
+			best, depth, ambiguous = &declared[i], n, false
+		case n == depth && best.Target.Key != d.Target.Key:
+			ambiguous = true
+		}
+	}
+	if ambiguous {
+		return nil, true
+	}
+	return best, false
+}
+
+// serviceAt is the service in folder, or the repository's only one when the
+// folder is its root.
+func serviceAt(targets []Target, folder string) string {
+	for _, t := range targets {
+		if strings.EqualFold(strings.Trim(t.Path, "/"), strings.Trim(folder, "/")) {
+			return t.Key
+		}
+	}
+	if strings.Trim(folder, "/") == "" && len(targets) == 1 {
+		return targets[0].Key
+	}
+	return ""
+}
+
+// folderHolding is the deepest service folder, never the root, that holds folder.
+func folderHolding(targets []Target, folder string) (Target, bool) {
+	var best Target
+	depth := 0
+	for _, t := range targets {
+		p := strings.Trim(t.Path, "/")
+		if p != "" && under(folder, p) && len(p) > depth {
+			best, depth = t, len(p)
+		}
+	}
+	return best, depth > 0
 }
 
 // PipelineDeployments are a pipeline's deployments for a service that deploys

@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -340,6 +341,75 @@ func TestAnArgoCDSyncGoesToTheServiceThatNamesItsSource(t *testing.T) {
 	h.mu.Unlock()
 	if repo != shopKey {
 		t.Errorf("the sync's repository is %v, want the service's", repo)
+	}
+}
+
+func TestAnArgoCDSyncGoesToTheServiceTheOperatorLinksItTo(t *testing.T) {
+	h := newEstate(t)
+	e := deployEngine(t, h, &forge{}, true)
+	var logs bytes.Buffer
+	e.o.Log = slog.New(slog.NewJSONHandler(&logs, nil))
+	toolKey, _ := track(e, "vendor/tool", &services.Found{Services: []services.Service{{ID: "", Path: "", Name: "tool"}}})
+	platformKey, _ := track(e, "example/platform", &services.Found{Services: []services.Service{{ID: "", Path: "", Name: "platform"}, {ID: "services/orders", Path: "services/orders", Name: "orders"}}})
+	shopKey, _ := track(e, "example/shop", nil)
+	declared, err := services.ParseDescriptor([]byte("service: "+shopKey+"\ndeploys:\n  argocd:\n  - https://gitlab.example.com/ops/gitops/-/tree/main/apps/shop\n"), shopKey)
+	if err != nil {
+		t.Fatalf("orrery.yaml refused: %v", err)
+	}
+	e.repos[shopKey].found = &services.Found{Services: []services.Service{{ID: "", Path: "", Name: "shop"}}, Descriptions: []services.Description{{Descriptor: *declared, File: "orrery.yaml"}}}
+	track(e, "ops/gitops", &services.Found{Services: []services.Service{{ID: "", Path: "", Name: "gitops", Type: "infrastructure"}}})
+	argoHub(h, map[string][2]string{
+		// The tool runs on two clusters from a chart: its name places both.
+		"c1/argocd/tool": {"https://charts.example.com", ""},
+		"c2/argocd/tool": {"https://charts.example.com", ""},
+		// A folder of the GitOps repository holds the orders app's manifests.
+		"c1/argocd/orders-prod": {"https://gitlab.example.com/ops/gitops", "apps/orders/envs/prod"},
+		// shop's own orrery.yaml names this source; the operator's link says otherwise.
+		"c1/argocd/shop": {"https://gitlab.example.com/ops/gitops", "apps/shop/envs/prod"},
+		// A link names this app's service, which no watched repository holds.
+		"c1/argocd/ghost": {"https://charts.example.com", ""},
+	})
+	// A sync kept 150 days is placed by the same pass.
+	h.mu.Lock()
+	h.lists["sw_deployment"] = append(h.lists["sw_deployment"], map[string]any{"key": "c1/argocd/tool/old", "fields": map[string]any{"status": "succeeded", "revision": "m0",
+		"deployed_at": time.Now().Add(-150 * 24 * time.Hour).UTC().Format(time.RFC3339)}, "relations": map[string]any{"app": []any{map[string]any{"key": "c1/argocd/tool"}}}})
+	h.mu.Unlock()
+	e.o.ArgoServices = map[string]string{
+		"tool": toolKey,
+		"https://gitlab.example.com/ops/gitops/-/tree/main/apps/orders": platformKey + "/services/orders",
+		"c1/argocd/shop":    platformKey,
+		"c1/argocd/missing": toolKey,
+		"c1/argocd/ghost":   "gitlab/vendor/nothing",
+	}
+
+	e.pushOutcomes(context.Background())
+
+	for key, want := range map[string]string{
+		"c1/argocd/tool/1":        toolKey,
+		"c2/argocd/tool/1":        toolKey,
+		"c1/argocd/tool/old":      toolKey,
+		"c1/argocd/orders-prod/1": platformKey + "/services/orders",
+		"c1/argocd/shop/1":        platformKey,
+	} {
+		if got := h.service(t, key); got != want {
+			t.Errorf("%s went to %q, want %q", key, got, want)
+		}
+	}
+	h.mu.Lock()
+	repo := h.written["c1/argocd/tool/1"].Relations["repository"]
+	_, ghost := h.written["c1/argocd/ghost/1"]
+	h.mu.Unlock()
+	if repo != toolKey {
+		t.Errorf("the linked sync's repository is %v, want the service's", repo)
+	}
+	if ghost {
+		t.Error("a link to a service no watched repository holds placed a sync")
+	}
+	out := logs.String()
+	for _, want := range []string{`"app":"c1/argocd/shop"`, `"declared":"` + shopKey + `"`, `"service":"gitlab/vendor/nothing"`, `"link":"c1/argocd/missing"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the logs do not say %s:\n%s", want, out)
+		}
 	}
 }
 

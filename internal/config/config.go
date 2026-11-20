@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Config is every setting, read once at start.
@@ -27,6 +28,10 @@ type Config struct {
 	// ComponentFields are the orrery.yaml fields whose value names a service
 	// in its deployments' environments and jobs.
 	ComponentFields []string
+	// ArgoServices are the operator's links from an Argo CD app, by its key
+	// or name, or from the source its manifests are read from, to the
+	// service it deploys.
+	ArgoServices map[string]string
 	// The flaky rule: the newest finished runs read for evidence, the passes
 	// in a row that clear it, and the oldest evidence that counts, in days.
 	FlakyWindowRuns int
@@ -123,6 +128,7 @@ func Parse(get func(string) string) (Config, error) {
 		ProbePaths:   probePaths(list("PROBE_PATHS"), &errs),
 
 		ComponentFields: listOr("DEPLOY_COMPONENT_FIELDS", []string{"deploy_component"}),
+		ArgoServices:    links("ARGOCD_SERVICES", get("ARGOCD_SERVICES"), &errs),
 
 		FlakyWindowRuns: num("FLAKY_WINDOW_RUNS", 20),
 		FlakyClearRuns:  num("FLAKY_CLEAR_RUNS", 5),
@@ -168,6 +174,38 @@ func Parse(get func(string) string) (Config, error) {
 		return Config{}, fmt.Errorf("invalid configuration: %w", err)
 	}
 	return c, nil
+}
+
+// links reads `<argocd app or source>=<service key>` pairs, split by commas
+// or line breaks, so a long list can be written one pair a line. A source
+// may hold an "=" of its own; a service key never does. A pair with either
+// side empty, or one side linked to two services, is an error.
+func links(name, raw string, errs *[]error) map[string]string {
+	out := map[string]string{}
+	seen := map[string]string{}
+	for _, pair := range strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == '\n' || r == '\r' }) {
+		if pair = strings.TrimSpace(pair); pair == "" {
+			continue
+		}
+		i := strings.LastIndex(pair, "=")
+		from, service := "", ""
+		if i >= 0 {
+			from, service = strings.TrimSpace(pair[:i]), strings.TrimSpace(pair[i+1:])
+		}
+		if from == "" || service == "" || strings.ContainsFunc(from+service, unicode.IsSpace) {
+			*errs = append(*errs, fmt.Errorf("%s: %q is not <argocd app or source>=<service key>", name, pair))
+			continue
+		}
+		if had, ok := seen[strings.ToLower(from)]; ok {
+			if !strings.EqualFold(out[had], service) {
+				*errs = append(*errs, fmt.Errorf("%s: %q is linked to %q and %q", name, from, out[had], service))
+			}
+			continue
+		}
+		seen[strings.ToLower(from)] = from
+		out[from] = service
+	}
+	return out
 }
 
 // probePaths cleans each path to the form a forge lists, slash separated

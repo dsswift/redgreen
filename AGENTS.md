@@ -37,7 +37,10 @@ The forges' door into Orrery. Read `README.md` first.
   writes none. `attribute.go` is the only place a deployment is placed on a
   service (`Attribute` for forge deployments, `MapSyncs` for Argo CD syncs);
   it runs on every pass over the deployments kept for the window, so a rule
-  change places old deployments too. A deployment of several services is
+  change places old deployments too. An Argo CD app is placed first by what
+  someone says: the operator's `ARGOCD_SERVICES` link, which wins, or a
+  service's `deploys.argocd`. A service's repository never names an
+  estate's GitOps repository; the operator's setting does. A deployment of several services is
   one record per service, keyed `<key>@<service folder>` past the first; a
   pipeline deployment is keyed `<service>@run-<id>`. redgreen deletes a key
   of its own shape that it no longer makes. `orrery.go` reads Argo CD syncs,

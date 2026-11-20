@@ -47,6 +47,10 @@ type Options struct {
 	// ComponentFields are the orrery.yaml fields whose value names a service
 	// in its deployments' environments and jobs.
 	ComponentFields []string
+	// ArgoServices are the operator's links from an Argo CD app, by its key
+	// or name, or from the source its manifests are read from, to the
+	// service it deploys.
+	ArgoServices map[string]string
 }
 
 // tracked is one repository as the last read left it.

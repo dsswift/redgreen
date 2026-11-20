@@ -112,7 +112,13 @@ func (e *Engine) pushOutcomes(ctx context.Context) {
 		if err != nil {
 			e.o.Log.ErrorContext(ctx, "orrery read failed; outcomes count forge deployments alone", "error", err)
 		} else {
-			found, skipped := outcomes.MapSyncs(syncs, apps, workloads, e.places(ctx, keys), e.o.GitLabHost)
+			found, mapping := outcomes.MapSyncs(syncs, apps, workloads, e.places(ctx, keys), e.o.GitLabHost)
+			for _, c := range mapping.Conflicts {
+				e.o.Log.WarnContext(ctx, "an ARGOCD_SERVICES link and a service's orrery.yaml place one Argo CD app on different services; the link wins", "app", c.App, "linked", c.Linked, "declared", c.Declared)
+			}
+			for _, link := range mapping.Unmatched {
+				e.o.Log.WarnContext(ctx, "ARGOCD_SERVICES names an Argo CD app or source the hub holds no app for; it places nothing", "link", link)
+			}
 			var dropped outcomes.Skipped
 			incidents, dropped = outcomes.MapIncidents(raw, workloads, e.o.GitLabHost)
 			withService := 0
@@ -123,7 +129,7 @@ func (e *Engine) pushOutcomes(ctx context.Context) {
 				}
 			}
 			records = append(records, found...)
-			e.o.Log.InfoContext(ctx, "orrery deployments read", "syncs", len(syncs), "apps", len(apps), "kept", len(found), "onAService", withService, "skipped", skipped, "incidents", len(incidents), "incidentsSkipped", dropped)
+			e.o.Log.InfoContext(ctx, "orrery deployments read", "syncs", len(syncs), "apps", len(apps), "kept", len(found), "onAService", withService, "placedBy", mapping.Placed, "skipped", mapping.Skipped, "incidents", len(incidents), "incidentsSkipped", dropped)
 		}
 	}
 
@@ -247,8 +253,9 @@ func (e *Engine) pathsOf(ctx context.Context, t *tracked, repoKey string) (outco
 	}, doubt
 }
 
-// places is what places Argo CD syncs: the sources each tracked service's
-// orrery.yaml names, and each tracked repository's services.
+// places is what places Argo CD syncs: the operator's links, the sources
+// each tracked service's orrery.yaml names, and each tracked repository's
+// services.
 func (e *Engine) places(ctx context.Context, keys []string) outcomes.Places {
 	var declared []outcomes.Declared
 	for _, k := range keys {
@@ -269,19 +276,75 @@ func (e *Engine) places(ctx context.Context, keys []string) outcomes.Places {
 				}
 				for _, target := range targets {
 					if target.Key == d.Service {
-						declared = append(declared, outcomes.Declared{Source: ref, RepoKey: k, Target: target})
+						declared = append(declared, outcomes.Declared{From: src, Source: ref, RepoKey: k, Target: target})
 					}
 				}
 			}
 		}
 	}
-	return outcomes.Places{Declared: declared, Targets: func(key string) []outcomes.Target {
+	return outcomes.Places{Linked: e.linked(ctx, keys), Declared: declared, Targets: func(key string) []outcomes.Target {
 		t := e.get(key)
 		if t == nil {
 			return nil
 		}
 		return e.targets(key, t.found)
 	}}
+}
+
+// linked is the operator's ARGOCD_SERVICES links, each tied to the service
+// it names. A link to a service no watched repository holds is logged and
+// left out; one whose repository is not read yet waits for the next pass.
+func (e *Engine) linked(ctx context.Context, keys []string) []outcomes.Declared {
+	if len(e.o.ArgoServices) == 0 {
+		return nil
+	}
+	type at struct {
+		repo   string
+		target outcomes.Target
+	}
+	found := map[string]at{}
+	unread := map[string]bool{}
+	for _, k := range keys {
+		t := e.get(k)
+		if t == nil || t.found == nil {
+			unread[k] = true
+			continue
+		}
+		for _, target := range e.targets(k, t.found) {
+			found[strings.ToLower(target.Key)] = at{k, target}
+		}
+	}
+	froms := make([]string, 0, len(e.o.ArgoServices))
+	for from := range e.o.ArgoServices {
+		froms = append(froms, from)
+	}
+	sort.Strings(froms)
+	var out []outcomes.Declared
+	for _, from := range froms {
+		service := strings.ToLower(strings.Trim(e.o.ArgoServices[from], "/"))
+		s, ok := found[service]
+		if !ok {
+			if repo := ownerOf(service+"/", unread); repo != "" {
+				e.o.Log.InfoContext(ctx, "ARGOCD_SERVICES link waits for its service's repository to be read", "link", from, "service", service, "repo", repo)
+			} else {
+				e.o.Log.WarnContext(ctx, "ARGOCD_SERVICES names a service no watched repository holds; the link is skipped", "link", from, "service", service)
+			}
+			continue
+		}
+		d := outcomes.Declared{From: from, RepoKey: s.repo, Target: s.target}
+		if strings.Contains(from, "://") {
+			ref, ok := outcomes.ParseRepoURL(from, e.o.GitLabHost)
+			if !ok {
+				e.o.Log.WarnContext(ctx, "ARGOCD_SERVICES names a source that is no repository's web address; the link is skipped", "link", from)
+				continue
+			}
+			d.Source = ref
+		} else {
+			d.App = from
+		}
+		out = append(out, d)
+	}
+	return out
 }
 
 // dropUnmade deletes the deployments redgreen made under a key of its own

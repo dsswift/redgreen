@@ -68,6 +68,40 @@ deploys:
   is this service's. The longest source named wins; two services naming the
   same one place neither.
 
+### How an operator says what an Argo CD app deploys
+
+A service's repository cannot always name the apps that deploy it. A tool
+someone else wrote, or one whose source lives on another forge, may run
+from the estate's own GitOps repository, and naming that repository in the
+tool's source would tie the tool to one estate. The operator who runs
+redgreen links those apps to their services in redgreen's own settings
+instead, with `ARGOCD_SERVICES`: pairs of `<argocd app or source>=<service
+key>`, split by commas or line breaks.
+
+```text
+ARGOCD_SERVICES=
+  orders=gitlab/acme/orders
+  prod/argocd/billing=gitlab/acme/billing
+  https://gitlab.example.com/ops/gitops/-/tree/main/apps/jobs=gitlab/acme/jobs/pusher
+```
+
+- An app is named by its key on the hub (`prod/argocd/billing`), or by its
+  name, the key's last part (`orders`), which names every app so called, on
+  every cluster. A key beats a name.
+- A source is a repository's web address with a folder, written as for
+  `deploys.argocd`. It names every app read from that folder or under it;
+  the longest source wins, and two links of the same source to different
+  services place neither. A link naming the app beats a source.
+- The service key is a service redgreen found in a repository it watches.
+  A link to any other service, or one naming no app the hub holds, is
+  logged as a warning on every pass and places nothing. It never stops a
+  sweep. A pair it cannot read, or one app or source linked to two
+  services, stops redgreen at start, like any setting it cannot use.
+- A link ranks with `deploys.argocd`, ahead of the workload and the folder.
+  Where the two place one app on different services, the link wins and the
+  conflict is logged: the operator runs the estate, and a service's file is
+  written once for every estate that runs it.
+
 ### What a service's config files say it reaches
 
 redgreen reads the config files in each service's own folder, at the same
@@ -174,11 +208,13 @@ places stays without a service. A repository with several services no
 longer gives every deployment to its root service: the root gets the ones
 whose name or changed files point at it.
 
-An Argo CD sync is placed by the source a service's orrery.yaml names
-(`deploys.argocd`), else by its app's workload, else by its app's source
+An Argo CD sync is placed by the operator's link (`ARGOCD_SERVICES`) or the
+source a service's orrery.yaml names (`deploys.argocd`), the link winning
+where they disagree; else by its app's workload; else by its app's source
 when that sits inside a service's own folder in a watched repository. A
 repository's root holds every folder, so a source at a root is no evidence:
-a root service is placed only by naming the source.
+a root service is placed only by naming the source. A new link places the
+syncs of the last 200 days on the next pass.
 
 A deployment is what a forge records against an environment. On GitHub and
 GitLab that is a deployment. On Azure DevOps it is each job a pipeline ran
@@ -204,6 +240,7 @@ redgreen serve
 | `SYNC_CONCURRENCY` | Repositories read at once, 4. |
 | `BOT_AUTHORS` | More commit authors that count as automation, comma separated. |
 | `DEPLOY_COMPONENT_FIELDS` | The orrery.yaml `fields` whose value names a service in its deployments' environments and job names, comma separated: `deploy_component`. |
+| `ARGOCD_SERVICES` | The operator's links from an Argo CD app, by key or name, or from a source, to the service it deploys: `<argocd app or source>=<service key>` pairs, split by commas or line breaks. See "How an operator says what an Argo CD app deploys". |
 | `PROBE_PATHS` | Files or folders to look for in every repository, from its root, comma separated: `docs/notes,docs/guides`. Each repository's `paths_present` lists the ones its default branch holds, empty when it holds none, and stays unset when this is empty. It reads the file tree redgreen already lists for services, so it costs no extra calls. A tree GitHub cuts short leaves `paths_present` unset, since a missing path may still be there. |
 | `FLAKY_WINDOW_RUNS`, `FLAKY_CLEAR_RUNS`, `FLAKY_MAX_AGE_DAYS` | The flaky rule: finished runs read, 20; passes in a row that clear it, 5; days evidence counts, 180. |
 | `ORRERY_URL` | The hub's machine surface. |

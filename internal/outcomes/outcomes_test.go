@@ -229,7 +229,7 @@ func TestMapSyncsSaysWhyEachWasLeftOut(t *testing.T) {
 		Targets: func(key string) []Target { return targets[key] },
 	}
 	at := "2026-10-30T10:00:05Z"
-	got, skipped := MapSyncs([]HubDeployment{
+	got, m := MapSyncs([]HubDeployment{
 		sync("home/argocd/redgreen/3", "home/argocd/redgreen", "succeeded", at),
 		sync("home/argocd/portal/9", "home/argocd/portal", "failed", at),
 		sync("home/argocd/shop/1", "home/argocd/shop", "succeeded", at),
@@ -259,8 +259,70 @@ func TestMapSyncsSaysWhyEachWasLeftOut(t *testing.T) {
 	if !reflect.DeepEqual(rows, want) {
 		t.Errorf("records = %+v\nwant %+v", rows, want)
 	}
-	if want := (Skipped{"no_app": 1, "unplaced": 1, "no_repo_url": 1, "repo_not_tracked": 1, "unfinished": 1, "ambiguous": 1, "no_workload": 1}); !reflect.DeepEqual(skipped, want) {
-		t.Errorf("skipped = %v, want %v", skipped, want)
+	if want := (Skipped{"no_app": 1, "unplaced": 1, "no_repo_url": 1, "repo_not_tracked": 1, "unfinished": 1, "ambiguous": 1, "no_workload": 1}); !reflect.DeepEqual(m.Skipped, want) {
+		t.Errorf("skipped = %v, want %v", m.Skipped, want)
+	}
+	if want := (Placed{"declared": 1, "workload": 2, "folder": 1}); !reflect.DeepEqual(m.Placed, want) {
+		t.Errorf("placed = %v, want %v", m.Placed, want)
+	}
+}
+
+func TestALinkByKeyBeatsOneByNameAndBothBeatASource(t *testing.T) {
+	app := func(key, repo, path string) HubApp {
+		var a HubApp
+		a.Key, a.Fields.RepoURL, a.Fields.Path = key, repo, path
+		return a
+	}
+	sync := func(app string) HubDeployment {
+		var d HubDeployment
+		d.Key, d.Fields.Status, d.Fields.Revision, d.Fields.DeployedAt = app+"/1", "succeeded", "abc", "2026-10-30T10:00:05Z"
+		d.Relations.App = []related{{Key: app}}
+		return d
+	}
+	to := func(from, service string) Declared {
+		d := Declared{From: from, RepoKey: service, Target: Target{Key: service}}
+		if ref, ok := ParseRepoURL(from, ""); ok {
+			d.Source = ref
+		} else {
+			d.App = from
+		}
+		return d
+	}
+	apps := []HubApp{
+		app("prod/argocd/jobs", "https://github.com/acme/gitops", "apps/jobs"),
+		app("test/argocd/jobs", "https://github.com/acme/gitops", "apps/jobs"),
+		app("prod/argocd/web", "https://github.com/acme/gitops", "apps/web"),
+		app("prod/argocd/api", "https://github.com/acme/gitops", "apps/api"),
+	}
+	places := Places{
+		Linked: []Declared{
+			to("jobs", "github/acme/jobs"),
+			to("prod/argocd/jobs", "github/acme/jobs-prod"),
+			to("https://github.com/acme/gitops/tree/main/apps", "github/acme/apps"),
+			to("https://github.com/acme/gitops/tree/main/apps/api", "github/acme/api"),
+			to("https://github.com/acme/gitops/tree/release/apps/api", "github/acme/api-next"),
+			to("prod/argocd/gone", "github/acme/gone"),
+		},
+		Declared: []Declared{{Source: RepoRef{Provider: "github", FullName: "acme/gitops", Path: "apps/web"}, RepoKey: "github/acme/web", Target: Target{Key: "github/acme/web"}}},
+		Targets:  func(string) []Target { return nil },
+	}
+	got, m := MapSyncs([]HubDeployment{sync("prod/argocd/jobs"), sync("test/argocd/jobs"), sync("prod/argocd/web"), sync("prod/argocd/api")}, apps, nil, places, "")
+	services := map[string]string{}
+	for _, r := range got {
+		services[r.Key] = r.Service
+	}
+	want := map[string]string{"prod/argocd/jobs/1": "github/acme/jobs-prod", "test/argocd/jobs/1": "github/acme/jobs", "prod/argocd/web/1": "github/acme/apps"}
+	if !reflect.DeepEqual(services, want) {
+		t.Errorf("services = %v, want %v", services, want)
+	}
+	if m.Skipped["ambiguous"] != 1 {
+		t.Errorf("two links of one source to two services placed it: skipped %v", m.Skipped)
+	}
+	if want := []Conflict{{App: "prod/argocd/web", Linked: "github/acme/apps", Declared: "github/acme/web"}}; !reflect.DeepEqual(m.Conflicts, want) {
+		t.Errorf("conflicts = %v, want %v", m.Conflicts, want)
+	}
+	if want := []string{"prod/argocd/gone"}; !reflect.DeepEqual(m.Unmatched, want) {
+		t.Errorf("unmatched = %v, want %v", m.Unmatched, want)
 	}
 }
 
