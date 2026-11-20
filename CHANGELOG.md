@@ -55,6 +55,12 @@ All notable changes to this project will be documented in this file. See [standa
 * one language list and open fields ([dafe517](https://github.com/dsswift/redgreen/commit/dafe5174f0f73ab5ec834e686569882f91c35749))
 * push forge deployments to orrery ([185abff](https://github.com/dsswift/redgreen/commit/185abff406076d4b4a343b502ade925caf96625e))
 
+## [1.12.0](https://github.com/dsswift/redgreen/compare/v1.11.0...v1.12.0) (2026-11-20)
+
+### Features
+
+* **redgreen:** link argo cd apps to hub services ([09054eb](https://github.com/dsswift/redgreen/commit/09054ebeeebbe6458c6648ae16f141ecfccac1d8))
+
 ## [1.11.0](https://github.com/dsswift/redgreen/compare/v1.10.0...v1.11.0) (2026-11-20)
 
 ### Features
