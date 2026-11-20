@@ -161,7 +161,10 @@ func (e *Engine) pushOutcomes(ctx context.Context) {
 			// Another source reports this job: its entity takes the outcome.
 			x = sdk.Entity{Blueprint: catalog.Deployment, Key: other, Fields: o.Fields(), Relations: map[string]any{"repository": r.RepoKey}}
 		case argo[r.Key]:
-			rel := map[string]any{"repository": r.RepoKey}
+			rel := map[string]any{}
+			if r.RepoKey != "" {
+				rel["repository"] = r.RepoKey
+			}
 			if r.Service != "" {
 				rel["service"] = r.Service
 			}
@@ -292,17 +295,17 @@ func (e *Engine) places(ctx context.Context, keys []string) outcomes.Places {
 }
 
 // linked is the operator's ARGOCD_SERVICES links, each tied to the service
-// it names. A link to a service no watched repository holds is logged and
-// left out; one whose repository is not read yet waits for the next pass.
+// it names: one a watched repository holds, else one the hub holds, whoever
+// wrote it. A service only the hub holds has no repository redgreen reads,
+// so its syncs carry no commits: they count for deploy frequency and change
+// failure rate, never for lead time. A link to a service neither holds is
+// logged and left out; one whose repository is not read yet waits for the
+// next pass.
 func (e *Engine) linked(ctx context.Context, keys []string) []outcomes.Declared {
 	if len(e.o.ArgoServices) == 0 {
 		return nil
 	}
-	type at struct {
-		repo   string
-		target outcomes.Target
-	}
-	found := map[string]at{}
+	found := map[string]linkTarget{}
 	unread := map[string]bool{}
 	for _, k := range keys {
 		t := e.get(k)
@@ -311,9 +314,12 @@ func (e *Engine) linked(ctx context.Context, keys []string) []outcomes.Declared 
 			continue
 		}
 		for _, target := range e.targets(k, t.found) {
-			found[strings.ToLower(target.Key)] = at{k, target}
+			found[strings.ToLower(target.Key)] = linkTarget{k, target}
 		}
 	}
+	var onHub map[string]linkTarget
+	hubRead := false
+	hubOnly := map[string]bool{}
 	froms := make([]string, 0, len(e.o.ArgoServices))
 	for from := range e.o.ArgoServices {
 		froms = append(froms, from)
@@ -326,10 +332,21 @@ func (e *Engine) linked(ctx context.Context, keys []string) []outcomes.Declared 
 		if !ok {
 			if repo := ownerOf(service+"/", unread); repo != "" {
 				e.o.Log.InfoContext(ctx, "ARGOCD_SERVICES link waits for its service's repository to be read", "link", from, "service", service, "repo", repo)
-			} else {
-				e.o.Log.WarnContext(ctx, "ARGOCD_SERVICES names a service no watched repository holds; the link is skipped", "link", from, "service", service)
+				continue
 			}
-			continue
+			if !hubRead {
+				hubRead = true
+				onHub = e.hubServices(ctx)
+			}
+			if onHub == nil {
+				e.o.Log.WarnContext(ctx, "ARGOCD_SERVICES names a service no watched repository holds, and the hub's services could not be read; the link is skipped this pass", "link", from, "service", service)
+				continue
+			}
+			if s, ok = onHub[service]; !ok {
+				e.o.Log.WarnContext(ctx, "ARGOCD_SERVICES names a service the hub does not hold; the link is skipped", "link", from, "service", service)
+				continue
+			}
+			hubOnly[s.target.Key] = true
 		}
 		d := outcomes.Declared{From: from, RepoKey: s.repo, Target: s.target}
 		if strings.Contains(from, "://") {
@@ -343,6 +360,43 @@ func (e *Engine) linked(ctx context.Context, keys []string) []outcomes.Declared 
 			d.App = from
 		}
 		out = append(out, d)
+	}
+	if len(hubOnly) > 0 {
+		list := make([]string, 0, len(hubOnly))
+		for k := range hubOnly {
+			list = append(list, k)
+		}
+		sort.Strings(list)
+		e.o.Log.InfoContext(ctx, "ARGOCD_SERVICES links place syncs on services no watched repository holds; their commits, and so their lead times, stay unknown", "services", list)
+	}
+	return out
+}
+
+// linkTarget is the service a link names and the repository it is homed in,
+// "" when the hub names none.
+type linkTarget struct {
+	repo   string
+	target outcomes.Target
+}
+
+// hubServices is every service the hub holds, by its key in lower case, with
+// the repository and folder the hub names for it; nil when they cannot be read.
+func (e *Engine) hubServices(ctx context.Context) map[string]linkTarget {
+	if e.o.Read == nil {
+		return nil
+	}
+	list, err := e.o.Read.Services(ctx)
+	if err != nil {
+		e.o.Log.WarnContext(ctx, "the hub's services unreadable", "error", err)
+		return nil
+	}
+	out := make(map[string]linkTarget, len(list))
+	for _, s := range list {
+		repo := ""
+		if len(s.Relations.Repository) > 0 {
+			repo = s.Relations.Repository[0].Key
+		}
+		out[strings.ToLower(s.Key)] = linkTarget{repo, outcomes.Target{Key: s.Key, Path: s.Fields.Path}}
 	}
 	return out
 }

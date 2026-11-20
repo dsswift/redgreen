@@ -413,6 +413,74 @@ func TestAnArgoCDSyncGoesToTheServiceTheOperatorLinksItTo(t *testing.T) {
 	}
 }
 
+func TestALinkPlacesSyncsOnAServiceOnlyTheHubHolds(t *testing.T) {
+	h := newEstate(t)
+	e := deployEngine(t, h, &forge{}, true)
+	var logs bytes.Buffer
+	e.o.Log = slog.New(slog.NewJSONHandler(&logs, nil))
+	argoHub(h, map[string][2]string{"c1/argocd/tool": {"https://charts.example.com", ""}, "c1/argocd/ghost": {"https://charts.example.com", ""}})
+	stamp := func(ago time.Duration) string { return time.Now().Add(-ago).UTC().Format(time.RFC3339) }
+	sync := func(key, status string, ago time.Duration) map[string]any {
+		return map[string]any{"key": key, "fields": map[string]any{"status": status, "revision": "m-" + key, "deployed_at": stamp(ago)},
+			"relations": map[string]any{"app": []any{map[string]any{"key": "c1/argocd/tool"}}}}
+	}
+	h.mu.Lock()
+	h.lists["sw_deployment"] = append(h.lists["sw_deployment"], sync("c1/argocd/tool/f", "failed", 30*time.Hour), sync("c1/argocd/tool/g", "succeeded", 29*time.Hour))
+	// Another source wrote this service; no repository redgreen watches holds it.
+	h.lists["sw_service"] = []map[string]any{{"key": "github/vendor/tool", "fields": map[string]any{"path": nil}, "relations": map[string]any{}}}
+	h.lists["it_incident"] = []map[string]any{{"key": "i1", "fields": map[string]any{"severity": "critical", "opened_at": stamp(30 * time.Minute), "mitigated_at": stamp(6 * time.Minute)},
+		"relations": map[string]any{"service": []any{map[string]any{"key": "github/vendor/tool"}}}}}
+	h.mu.Unlock()
+	e.o.ArgoServices = map[string]string{"tool": "github/vendor/tool", "c1/argocd/ghost": "gitlab/vendor/nothing"}
+
+	e.pushOutcomes(context.Background())
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for key, want := range map[string]struct {
+		failed  bool
+		restore any
+	}{
+		"c1/argocd/tool/f": {true, 1.0},
+		"c1/argocd/tool/g": {false, nil},
+		// A critical incident on the service opened half an hour after this sync.
+		"c1/argocd/tool/1": {true, 0.9},
+	} {
+		x, ok := h.written[key]
+		if !ok {
+			t.Errorf("no deployment %s written; written: %v", key, h.keys())
+			continue
+		}
+		if got := x.Relations["service"]; got != "github/vendor/tool" {
+			t.Errorf("%s went to %v", key, got)
+		}
+		if repo, ok := x.Relations["repository"]; ok {
+			t.Errorf("%s names repository %v; the hub names none for its service", key, repo)
+		}
+		if x.Fields["failed_change"] != want.failed || x.Fields["restore_hours"] != want.restore {
+			t.Errorf("%s failed_change %v restore_hours %v, want %v %v", key, x.Fields["failed_change"], x.Fields["restore_hours"], want.failed, want.restore)
+		}
+		for _, f := range []string{"lead_time_hours", "commit_count", "fix_only"} {
+			if v, ok := x.Fields[f]; !ok || v != nil {
+				t.Errorf("%s %s = %v, want it written empty: no repository redgreen reads says", key, f, v)
+			}
+		}
+	}
+	if _, ghost := h.written["c1/argocd/ghost/1"]; ghost {
+		t.Error("a link to a service the hub does not hold placed a sync")
+	}
+	out := logs.String()
+	if !strings.Contains(out, `"msg":"ARGOCD_SERVICES names a service the hub does not hold; the link is skipped","link":"c1/argocd/ghost","service":"gitlab/vendor/nothing"`) {
+		t.Errorf("the logs do not warn of the link to a service the hub does not hold:\n%s", out)
+	}
+	if strings.Contains(out, "no watched repository holds; the link is skipped") {
+		t.Errorf("a link to a service the hub holds was warned of:\n%s", out)
+	}
+	if n := strings.Count(out, `"services":["github/vendor/tool"]`); n != 1 {
+		t.Errorf("the pass said %d times that a link places syncs on a service no watched repository holds, want once:\n%s", n, out)
+	}
+}
+
 func TestAServiceThatDeploysByItsPipelineGetsADeploymentPerRevision(t *testing.T) {
 	h := newEstate(t)
 	now := time.Now().UTC()

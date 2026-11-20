@@ -128,13 +128,27 @@ type HubIncident struct {
 	} `json:"fields"`
 	Relations struct {
 		Workload []related `json:"workload"`
+		Service  []related `json:"service"`
+	} `json:"relations"`
+}
+
+// HubService is an sw_service on the hub, whoever wrote it: the repository
+// it is homed in and its folder there, when the hub knows them.
+type HubService struct {
+	Key    string `json:"key"`
+	Fields struct {
+		Path string `json:"path"`
+	} `json:"fields"`
+	Relations struct {
+		Repository []related `json:"repository"`
 	} `json:"relations"`
 }
 
 // Skipped counts why syncs or incidents were left out.
 type Skipped map[string]int
 
-// MapIncidents ties each incident to the repository and folder of its workload.
+// MapIncidents ties each incident to the service it names, else to the
+// repository and folder of its workload.
 func MapIncidents(list []HubIncident, workloads []HubWorkload, gitlabHost string) ([]Incident, Skipped) {
 	workloadBy := map[string]HubWorkload{}
 	for _, w := range workloads {
@@ -153,6 +167,10 @@ func MapIncidents(list []HubIncident, workloads []HubWorkload, gitlabHost string
 		opened := parse(i.Fields.OpenedAt)
 		if opened == nil {
 			skipped["unopened"]++
+			continue
+		}
+		if len(i.Relations.Service) > 0 {
+			out = append(out, Incident{Service: i.Relations.Service[0].Key, Severity: i.Fields.Severity, OpenedAt: *opened, MitigatedAt: parse(i.Fields.MitigatedAt), ResolvedAt: parse(i.Fields.ResolvedAt)})
 			continue
 		}
 		if len(i.Relations.Workload) == 0 {
@@ -284,10 +302,9 @@ func (r Reader) Reported(ctx context.Context, from time.Time) ([]HubReport, erro
 
 // Read is one pass over what the hub holds: the workloads that place a sync
 // or an incident in a repository, the Argo CD apps, the syncs of an app
-// since `from`, and the incidents on a workload since. An app places its
-// syncs by its source as well as by its workload, so its syncs are read on a
-// hub with no workloads; an incident is placed only through its workload, so
-// a hub without one is asked for none.
+// since `from`, and the incidents since on a service or a workload. An app
+// places its syncs by its source as well as by its workload, so its syncs
+// are read on a hub with no workloads.
 func (r Reader) Read(ctx context.Context, from time.Time) ([]HubDeployment, []HubApp, []HubWorkload, []HubIncident, error) {
 	workloads, err := Entities[HubWorkload](ctx, r, Ask{Blueprint: "sw_workload", Fields: []string{"repo"}, Relations: []string{}})
 	if err != nil {
@@ -305,13 +322,22 @@ func (r Reader) Read(ctx context.Context, from time.Time) ([]HubDeployment, []Hu
 		}
 		syncs = after(syncs, func(d HubDeployment) string { return d.Fields.DeployedAt }, from)
 	}
-	if len(workloads) == 0 {
-		return syncs, apps, workloads, nil, nil
-	}
-	incidents, err := Entities[HubIncident](ctx, r, Ask{Blueprint: "it_incident", Filter: map[string]any{"and": []any{since("opened_at", from), map[string]any{"relation": "workload"}}}, Fields: []string{"severity", "opened_at", "mitigated_at", "resolved_at"}, Relations: []string{"workload"}})
+	placed := map[string]any{"or": []any{map[string]any{"relation": "service"}, map[string]any{"relation": "workload"}}}
+	incidents, err := Entities[HubIncident](ctx, r, Ask{Blueprint: "it_incident", Filter: map[string]any{"and": []any{since("opened_at", from), placed}}, Fields: []string{"severity", "opened_at", "mitigated_at", "resolved_at"}, Relations: []string{"service", "workload"}})
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("incidents: %w", err)
 	}
 	incidents = after(incidents, func(i HubIncident) string { return i.Fields.OpenedAt }, from)
 	return syncs, apps, workloads, incidents, nil
+}
+
+// Services reads every service the hub holds, whoever wrote it, with the
+// repository and folder it names. An operator's link may place syncs on one
+// that no watched repository holds.
+func (r Reader) Services(ctx context.Context) ([]HubService, error) {
+	list, err := Entities[HubService](ctx, r, Ask{Blueprint: "sw_service", Fields: []string{"path"}, Relations: []string{"repository"}})
+	if err != nil {
+		return nil, fmt.Errorf("services: %w", err)
+	}
+	return list, nil
 }

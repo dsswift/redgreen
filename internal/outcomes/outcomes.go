@@ -9,6 +9,7 @@ import (
 	"math"
 	"regexp"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/dsswift/redgreen/internal/catalog"
@@ -44,8 +45,15 @@ type Record struct {
 	From string `json:"from,omitempty"`
 }
 
-// Stream is the line of deployments one record belongs to.
-func (r Record) Stream() string { return r.RepoKey + "\n" + r.Folder + "\n" + r.Environment }
+// Stream is the line of deployments one record belongs to: its repository,
+// folder, and environment, or its service's where the hub names no
+// repository for the service.
+func (r Record) Stream() string {
+	if r.RepoKey == "" {
+		return "\n" + r.Service + "\n" + r.Environment
+	}
+	return r.RepoKey + "\n" + r.Folder + "\n" + r.Environment
+}
 
 // Carried is what a deployment carried, once read. Unknown is set when the
 // forge could not say.
@@ -55,8 +63,11 @@ type Carried struct {
 	Unknown bool              `json:"unknown,omitempty"`
 }
 
-// Incident is something that went wrong in production, from Orrery's it_incident.
+// Incident is something that went wrong in production, from Orrery's
+// it_incident: on the service it names, else on its workload's repository
+// and folder.
 type Incident struct {
+	Service     string
 	RepoKey     string
 	Folder      string
 	Severity    string
@@ -189,7 +200,8 @@ func repairAfter(list []Record, fixes []*bool, i int) int {
 func incidentAfter(r Record, incidents []Incident) *Incident {
 	var best *Incident
 	for i, inc := range incidents {
-		if inc.RepoKey != r.RepoKey || inc.Folder != r.Folder || (inc.Severity != "critical" && inc.Severity != "warning") {
+		on := inc.Service != "" && strings.EqualFold(inc.Service, r.Service) || inc.Service == "" && inc.RepoKey == r.RepoKey && inc.Folder == r.Folder
+		if !on || (inc.Severity != "critical" && inc.Severity != "warning") {
 			continue
 		}
 		gap := inc.OpenedAt.Sub(r.FinishedAt)

@@ -44,9 +44,12 @@ The forges' door into Orrery. Read `README.md` first.
   one record per service, keyed `<key>@<service folder>` past the first; a
   pipeline deployment is keyed `<service>@run-<id>`. redgreen deletes a key
   of its own shape that it no longer makes. `orrery.go` reads Argo CD syncs,
-  apps, workloads, and `it_incident` back from Orrery with
-  `ORRERY_READ_TOKEN`; a workload's `repo` URL, read by `repourl.go`, places
-  a sync or an incident in a repository and folder. Each page of a hub list goes through `provider.Get` like a forge
+  apps, workloads, `it_incident`, and the services an `ARGOCD_SERVICES` link
+  may name, back from Orrery with `ORRERY_READ_TOKEN`; a workload's `repo`
+  URL, read by `repourl.go`, places a sync or an incident in a repository
+  and folder, and an incident's `service` relation places it on that
+  service. A link may name a service only the hub holds: its syncs carry no
+  commits, so redgreen never guesses their lead time. Each page of a hub list goes through `provider.Get` like a forge
   read, so an unchanged page is a 304. A question must read the same from one
   cycle to the next, or its tag never matches: a time in a filter is asked by
   the day (`since`) and trimmed to the moment in Go.

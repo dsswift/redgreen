@@ -92,10 +92,16 @@ ARGOCD_SERVICES=
   `deploys.argocd`. It names every app read from that folder or under it;
   the longest source wins, and two links of the same source to different
   services place neither. A link naming the app beats a source.
-- The service key is a service redgreen found in a repository it watches.
-  A link to any other service, or one naming no app the hub holds, is
-  logged as a warning on every pass and places nothing. It never stops a
-  sweep. A pair it cannot read, or one app or source linked to two
+- The service key is any service the hub holds: one redgreen found in a
+  repository it watches, or one another source wrote. A service no watched
+  repository holds gets its syncs with their status, time, revision, and
+  failed change, from the sync's status and the incidents on the service.
+  redgreen reads no commits for it, so its syncs count for deploy frequency
+  and change failure rate, and its lead time, commit counts, fix-only flags,
+  and the restores a fix would give stay empty. One info line per pass names
+  those services. A link to a service the hub does not hold, or one naming
+  no app the hub holds, is logged as a warning on every pass and places
+  nothing. It never stops a sweep. A pair it cannot read, or one app or source linked to two
   services, stops redgreen at start, like any setting it cannot use.
 - A link ranks with `deploys.argocd`, ahead of the workload and the folder.
   Where the two place one app on different services, the link wins and the
@@ -178,7 +184,8 @@ deployments around it:
   as when a deployment is placed on its service after it was read.
 - `fix_only`: every carried commit is a `fix`, a `revert`, or a forge's revert.
 - `failed_change`: it failed, a fix-only deployment followed within a day, or
-  a critical or warning `it_incident` opened on its workload within a day.
+  a critical or warning `it_incident` opened on its service within a day: the
+  service the incident names, else its workload's repository and folder.
 - `restore_hours`: to the next good deployment, the fix, or the incident's
   `mitigated_at`, else its `resolved_at`.
 
@@ -245,7 +252,7 @@ redgreen serve
 | `FLAKY_WINDOW_RUNS`, `FLAKY_CLEAR_RUNS`, `FLAKY_MAX_AGE_DAYS` | The flaky rule: finished runs read, 20; passes in a row that clear it, 5; days evidence counts, 180. |
 | `ORRERY_URL` | The hub's machine surface. |
 | `ORRERY_TOKEN` | A source token, registered for the blueprints above, with a delete grant on `sw_deployment` so it can remove its copy of a job another source reports. |
-| `ORRERY_READ_TOKEN` | An access token that may read: Argo CD syncs, apps, workloads, and incidents. |
+| `ORRERY_READ_TOKEN` | An access token that may read: Argo CD syncs, apps, workloads, incidents, and, when an `ARGOCD_SERVICES` link names a service no watched repository holds, services. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME` | OTLP traces and metrics; off when unset. |
 | `LOG_LEVEL` | `debug`, `info`, `warn`, or `error`. |
 | `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_APP_WEBHOOK_SECRET` | The GitHub App. |

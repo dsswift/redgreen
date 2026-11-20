@@ -159,7 +159,7 @@ func TestReadAsksOnlyForWhatItMaps(t *testing.T) {
 		"sw_workload":   {"repo", "", ""},
 		"argocd_app":    {"repo_url,path", "workload,environment", ""},
 		"sw_deployment": {"status,revision,deployed_at", "app", `{"and":[{"field":"deployed_at","op":"gte","value":"2026-05-01T00:00:00Z"},{"relation":"app"}]}`},
-		"it_incident":   {"severity,opened_at,mitigated_at,resolved_at", "workload", `{"and":[{"field":"opened_at","op":"gte","value":"2026-05-01T00:00:00Z"},{"relation":"workload"}]}`},
+		"it_incident":   {"severity,opened_at,mitigated_at,resolved_at", "service,workload", `{"and":[{"field":"opened_at","op":"gte","value":"2026-05-01T00:00:00Z"},{"or":[{"relation":"service"},{"relation":"workload"}]}]}`},
 	}
 	for _, q := range h.asked {
 		w := want[q.Get("blueprint")]
@@ -173,15 +173,37 @@ func TestReadAsksOnlyForWhatItMaps(t *testing.T) {
 	}
 }
 
-func TestReadAsksAHubWithNoWorkloadsForItsSyncsAndNoIncidents(t *testing.T) {
+func TestReadAsksAHubWithNoWorkloadsForItsSyncsAndItsServicesIncidents(t *testing.T) {
 	h := estate()
 	delete(h.answer, "sw_workload")
+	h.answer["it_incident"] = []map[string]any{{"key": "i2", "fields": map[string]any{"severity": "critical", "opened_at": "2026-05-02T00:00:00Z"}, "relations": map[string]any{"service": []any{map[string]any{"key": "github/acme/app"}}}}}
 	syncs, apps, workloads, incidents := read(t, h)
-	if len(syncs) != 1 || len(apps) != 1 || workloads != nil || incidents != nil {
-		t.Fatalf("read %v %v %v %v; an app places its syncs by its source", syncs, apps, workloads, incidents)
+	if len(syncs) != 1 || len(apps) != 1 || workloads != nil || len(incidents) != 1 {
+		t.Fatalf("read %v %v %v %v; an app places its syncs by its source, and an incident by its service", syncs, apps, workloads, incidents)
 	}
-	if got := h.blueprints(); !reflect.DeepEqual(got, []string{"sw_workload", "argocd_app", "sw_deployment"}) {
+	if got := h.blueprints(); !reflect.DeepEqual(got, []string{"sw_workload", "argocd_app", "sw_deployment", "it_incident"}) {
 		t.Errorf("asked %v", got)
+	}
+	mapped, skipped := MapIncidents(incidents, nil, "")
+	if len(mapped) != 1 || mapped[0].Service != "github/acme/app" || mapped[0].RepoKey != "" || len(skipped) != 0 {
+		t.Errorf("an incident on a service mapped to %+v, skipped %v", mapped, skipped)
+	}
+}
+
+func TestServicesReadsEveryServiceWithItsRepositoryAndFolder(t *testing.T) {
+	h := &hub{answer: map[string][]map[string]any{"sw_service": {
+		{"key": "github/acme/tool", "fields": map[string]any{"path": nil}, "relations": map[string]any{}},
+		{"key": "gitlab/acme/shop/api", "fields": map[string]any{"path": "api"}, "relations": map[string]any{"repository": []any{map[string]any{"key": "gitlab/acme/shop"}}}},
+	}}}
+	list, err := reader(t, h).Services(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 || list[0].Key != "github/acme/tool" || len(list[0].Relations.Repository) != 0 || list[1].Fields.Path != "api" || list[1].Relations.Repository[0].Key != "gitlab/acme/shop" {
+		t.Fatalf("services %+v", list)
+	}
+	if q := h.asked[0]; q.Get("fields") != "path" || q.Get("relations") != "repository" || q.Has("filter") {
+		t.Errorf("asked fields=%q relations=%q filter=%q", q.Get("fields"), q.Get("relations"), q.Get("filter"))
 	}
 }
 
