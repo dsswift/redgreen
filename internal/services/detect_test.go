@@ -296,9 +296,11 @@ func TestReadDescriptor(t *testing.T) {
 		m := memFiles{commit: "c", files: files}
 		paths, _ := m.List(ctx)
 		f := &Found{}
-		if err := f.describe(ctx, m, paths, "github/example/app"); err != nil {
+		unused, err := f.describe(ctx, m, paths, "github/example/app")
+		if err != nil {
 			t.Fatal(err)
 		}
+		f.Problems = append(f.Problems, f.unusable(unused)...)
 		problem := strings.Join(f.Problems, "; ")
 		if len(f.Descriptions) == 0 {
 			return nil, nil, problem
@@ -433,4 +435,99 @@ func TestWhatOnlyFeedsOrChecksTheServicesIsNoService(t *testing.T) {
 		"ROPApi.WebApi backend C# ROPApi.WebApi",
 		"web backend JavaScript web",
 	})
+}
+
+// envRepo is a repository that builds one infrastructure project per
+// environment folder, each with its own infra.yaml, Dockerfile, and Terraform.
+func envRepo(describe bool) map[string][]byte {
+	files := map[string][]byte{
+		"README.md":      []byte("# Environments\n"),
+		".gitlab-ci.yml": []byte("stages: [plan]\n"),
+		"deploy.sh":      []byte("#!/bin/sh\n"),
+	}
+	for _, env := range []string{"prod", "preprod", "test", "tenant"} {
+		files[env+"/infra.yaml"] = []byte("version: 1\n")
+		files[env+"/Dockerfile"] = []byte("FROM hashicorp/terraform\nCOPY terraform /tf\n")
+		files[env+"/terraform/main.tf"] = []byte(`resource "x" "y" {}`)
+		files[env+"/terraform/variables.tf"] = []byte(`variable "v" {}`)
+		if describe {
+			files[env+"/orrery.yaml"] = []byte("service: gitlab/acme/envs/" + env + "\nfields: {lifecycle: production}\nrelations: {program: [\"7\"]}\n")
+		}
+	}
+	return files
+}
+
+func services(t *testing.T, found *Found) []string {
+	t.Helper()
+	var out []string
+	for _, s := range found.Services {
+		out = append(out, strings.Join([]string{s.ID, s.Path, s.Type, s.Name}, " "))
+	}
+	return out
+}
+
+func TestAFolderOrreryYamlNamesTheServiceOfItsFolder(t *testing.T) {
+	ctx := context.Background()
+	found, _, err := Read(ctx, memFiles{commit: "c", files: envRepo(true)}, "gitlab/acme/envs", "envs", nil, Bots{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, services(t, found), []string{
+		"preprod preprod infrastructure preprod",
+		"prod prod infrastructure prod",
+		"tenant tenant infrastructure tenant",
+		"test test infrastructure test",
+	})
+	same(t, len(found.Descriptions), 4)
+	for _, env := range []string{"prod", "preprod", "test", "tenant"} {
+		d := found.Describing("gitlab/acme/envs/" + env)
+		if d == nil || d.File != env+"/orrery.yaml" || d.Path != env || d.Fields["lifecycle"] != "production" {
+			t.Errorf("%s described as %+v", env, d)
+		}
+	}
+	same(t, found.Problems, []string(nil))
+	for _, s := range found.Services {
+		if !s.Files.Dockerfile {
+			t.Errorf("%s lost its Dockerfile", s.ID)
+		}
+	}
+}
+
+func TestEachFolderInfraYamlIsATerraformRoot(t *testing.T) {
+	ctx := context.Background()
+	found, _, err := Read(ctx, memFiles{commit: "c", files: envRepo(false)}, "gitlab/acme/envs", "envs", nil, Bots{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A folder named test holds tests to the build-file rules; only an orrery.yaml says otherwise.
+	same(t, services(t, found), []string{
+		"preprod preprod infrastructure preprod",
+		"prod prod infrastructure prod",
+		"tenant tenant infrastructure tenant",
+	})
+}
+
+func TestADescribedFolderNeverHidesTheRestOfTheRepository(t *testing.T) {
+	ctx := context.Background()
+	found, _, err := Read(ctx, memFiles{commit: "c", files: map[string][]byte{
+		"Dockerfile":              []byte("FROM golang\nCOPY apps/shop /src\n"),
+		"apps/shop/main.go":       []byte("package main\nfunc main() {}\n"),
+		"apps/shop/orrery.yaml":   []byte("service: github/acme/mono/apps/shop\n"),
+		"tools/gen/package.json":  []byte(`{"name": "gen", "bin": "gen.js"}`),
+		"docs/alerts/orrery.yaml": []byte("groups: []\n"),
+		"empty/orrery.yaml":       []byte("service: github/acme/mono/empty/api\n"),
+	}}, "github/acme/mono", "mono", nil, Bots{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The root Dockerfile builds the described app, so it is no service of its own.
+	same(t, services(t, found), []string{"tools/gen tools/gen tool gen", "apps/shop apps/shop tool shop"})
+	if !found.Services[1].Files.Dockerfile {
+		t.Error("the root Dockerfile builds apps/shop")
+	}
+	// A file naming a folder the tree lacks stands on its own, at that folder.
+	if d := found.Describing("github/acme/mono/empty/api"); d == nil || d.Path != "empty/api" {
+		t.Errorf("empty/api = %+v", d)
+	}
+	same(t, found.Problems, []string(nil))
 }

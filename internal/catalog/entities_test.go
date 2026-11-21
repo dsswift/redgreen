@@ -59,6 +59,24 @@ func TestADescriptorWithNoBuildFileStillNamesItsService(t *testing.T) {
 	}
 }
 
+func TestEachFolderServiceWearsItsOwnDescription(t *testing.T) {
+	repo := &provider.Repo{Provider: provider.GitLab, FullName: "acme/envs"}
+	found := &services.Found{
+		Services: []services.Service{{ID: "prod", Path: "prod", Name: "prod", Type: services.Infrastructure}},
+		Descriptions: []services.Description{
+			{Descriptor: services.Descriptor{Service: "gitlab/acme/envs/prod", Fields: map[string]any{"lifecycle": "production"}, Relations: map[string]any{"program": []any{"7"}}}, File: "prod/orrery.yaml", Path: "prod"},
+			{Descriptor: services.Descriptor{Service: "gitlab/acme/envs/docs"}, File: "docs/orrery.yaml", Path: "docs"},
+		},
+	}
+	svcs, _ := ServiceEntities(repo, found, nil)
+	if len(svcs) != 2 || svcs[0].Key != "gitlab/acme/envs/prod" || svcs[0].Fields["path"] != "prod" || svcs[0].Fields["lifecycle"] != "production" || svcs[0].Relations["program"] == nil {
+		t.Fatalf("services = %+v", svcs)
+	}
+	if svcs[1].Key != "gitlab/acme/envs/docs" || svcs[1].Fields["path"] != "docs" {
+		t.Errorf("a service only its file names sits at its folder: %+v", svcs[1])
+	}
+}
+
 func TestConnectionsAreKeyedByServiceEnvironmentAndHost(t *testing.T) {
 	repo := &provider.Repo{Provider: provider.GitHub, FullName: "Acme/Shop"}
 	found := &services.Found{Services: []services.Service{{ID: "src/Api", Name: "Api"}}, Connections: []services.Connection{

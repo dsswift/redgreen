@@ -32,12 +32,25 @@ estate, its place in that estate's scheme; paths in it are from the
 repository root. redgreen reads the files with the services, at the same
 commit, so an estate lists exactly the services of the repositories it
 reads, and nothing it does not. The key must be the repository's own, or a
-folder in it; a file in a folder names a service at or under that folder. The place (`fields` and `relations`) is the estate's own
+folder in it; a file in a folder names a service at or under that folder.
+redgreen reads every `orrery.yaml` in the tree, outside vendored and build
+output folders. A folder a file names is a service of its own: the build
+files in it are read as if it were a repository, and the one service they
+find there is that folder's. Several found there stand under it. A folder a
+file names stands even where its name, such as `test`, would make the build
+files in it be skipped. The rest of the repository is read around those
+folders, and makes no catch-all service at its root when they hold the
+services. A file without a `service` key, in a folder that is no service,
+belongs to another tool and is left alone. The place (`fields` and `relations`) is the estate's own
 words: it travels on the service in every write, push and sweep alike,
 because each write replaces what redgreen wrote before. Where the hub lacks
 one of its names, the service is written again without its place and stands
 without it. A file that cannot be used is logged and left
 out; the services still stand.
+
+A folder `infra.yaml` with Terraform under it is one Terraform project:
+two or more of them, or of Terraform roots that declare a backend, are one
+infrastructure service each, at the project's folder.
 
 ### How a service says it deploys
 

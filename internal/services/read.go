@@ -5,6 +5,8 @@ import (
 	"path"
 	"slices"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // DescriptorFile is where a repository describes itself.
@@ -34,6 +36,9 @@ type Description struct {
 	Descriptor
 	// File is where it was read, from the repository root.
 	File string `json:"file"`
+	// Path is the folder its service names, as the tree spells it where the
+	// tree holds that folder; "" for the repository itself.
+	Path string `json:"path"`
 	Logo *Icon  `json:"logo,omitempty"`
 }
 
@@ -83,14 +88,16 @@ func Read(ctx context.Context, files Files, repoKey, repoName string, previous *
 			out.PathsPresent = Present(paths, probe)
 		}
 	}
-	out.Services = Detect(paths, reader.read, repoName)
+	unused, err := out.describe(ctx, files, paths, repoKey)
+	if err != nil {
+		return nil, Outcome{}, err
+	}
+	out.Services = Detect(paths, reader.read, repoName, out.bounds(paths)...)
 	out.connect(paths, reader.read)
 	if reader.err != nil {
 		return nil, Outcome{}, reader.err
 	}
-	if err := out.describe(ctx, files, paths, repoKey); err != nil {
-		return nil, Outcome{}, err
-	}
+	out.Problems = append(out.Problems, out.unusable(unused)...)
 	for i, s := range out.Services {
 		commits, err := files.Commits(ctx, s.Path)
 		if err != nil {
@@ -135,79 +142,141 @@ func (b *budgeted) read(path string) (string, bool) {
 	return string(data), true
 }
 
-// describe reads the orrery.yaml at the root and the one beside each
-// service. The root one names a service of this repository; one in a folder
-// names a service at or under that folder. Paths in a file are
-// from the repository root. A file that cannot be used, or a second one for
-// the same service, is a problem, not an error: the services still stand,
-// described by their files alone. A logo that cannot be used costs only the
-// logo.
-func (f *Found) describe(ctx context.Context, files Files, paths []string, repoKey string) error {
-	where := []string{DescriptorFile}
-	for _, s := range f.Services {
-		if s.Path != "" {
-			where = append(where, s.Path+"/"+DescriptorFile)
+// unused is an orrery.yaml that could not be used, why, and whether it names a service.
+type unused struct {
+	file, problem string
+	claims        bool
+}
+
+// describe reads every orrery.yaml in the tree, the root's first, outside
+// the folders that hold other people's code. The root one names a service of
+// this repository; one in a folder names a service at or under that folder.
+// Paths in a file are from the repository root. A file that cannot be used,
+// or a second one for the same service, is a problem, not an error: the
+// services still stand, described by their files alone. A logo that cannot
+// be used costs only the logo.
+func (f *Found) describe(ctx context.Context, files Files, paths []string, repoKey string) ([]unused, error) {
+	var where []string
+	for _, p := range paths {
+		if baseOf(p) == DescriptorFile && p != DescriptorFile && !foreignPath(p) {
+			where = append(where, p)
 		}
 	}
-	slices.Sort(where[1:])
-	where = slices.Compact(where)
+	slices.Sort(where)
+	if slices.Contains(paths, DescriptorFile) {
+		where = append([]string{DescriptorFile}, where...)
+	}
+	var out []unused
 	for _, file := range where {
-		if !slices.Contains(paths, file) {
-			continue
-		}
 		scope := repoKey
 		if dir := path.Dir(file); dir != "." {
 			scope += "/" + strings.ToLower(dir)
 		}
-		d, problem, err := readDescription(ctx, files, paths, file, scope)
+		d, problem, claims, err := readDescription(ctx, files, paths, file, scope)
 		if err != nil {
-			return err
+			return nil, err
+		}
+		if d == nil {
+			if problem != "" {
+				out = append(out, unused{file, problem, claims})
+			}
+			continue
 		}
 		if problem != "" {
 			f.Problems = append(f.Problems, file+": "+problem)
-		}
-		if d == nil {
-			continue
 		}
 		if f.Describing(d.Service) != nil {
 			f.Problems = append(f.Problems, file+": service "+d.Service+" is described twice; the first file stands")
 			continue
 		}
+		d.Path = folderOf(paths, strings.TrimPrefix(strings.TrimPrefix(d.Service, repoKey), "/"))
 		f.Descriptions = append(f.Descriptions, *d)
 	}
-	return nil
+	return out, nil
 }
 
-// readDescription reads one orrery.yaml, whose service is scope or under it, and the logo it names.
-func readDescription(ctx context.Context, files Files, paths []string, file, scope string) (*Description, string, error) {
+// unusable are the problems of the files that could not be used, where each
+// was meant for redgreen: at the root, beside a service, or naming one. Other
+// tools name their own files orrery.yaml too.
+func (f *Found) unusable(files []unused) []string {
+	var out []string
+	for _, u := range files {
+		dir := dirOf(u.file)
+		if u.file != DescriptorFile && !u.claims && !slices.ContainsFunc(f.Services, func(s Service) bool { return s.Path == dir }) {
+			continue
+		}
+		out = append(out, u.file+": "+u.problem)
+	}
+	return out
+}
+
+// bounds are the folders the tree holds that an orrery.yaml names as a service.
+func (f *Found) bounds(paths []string) []string {
+	var out []string
+	for _, d := range f.Descriptions {
+		if d.Path != "" && slices.ContainsFunc(paths, func(p string) bool { return strings.HasPrefix(p, d.Path+"/") }) {
+			out = append(out, d.Path)
+		}
+	}
+	return out
+}
+
+// folderOf is a folder as the tree spells it, found by its lower-case name,
+// or that name where the tree lacks it.
+func folderOf(paths []string, lower string) string {
+	if lower == "" {
+		return ""
+	}
+	for _, p := range paths {
+		if len(p) > len(lower) && p[len(lower)] == '/' && strings.ToLower(p[:len(lower)]) == lower {
+			return p[:len(lower)]
+		}
+	}
+	return lower
+}
+
+// foreignPath says whether a path sits in a folder of other people's code or of build output.
+func foreignPath(p string) bool {
+	parts := strings.Split(p, "/")
+	return slices.ContainsFunc(parts[:len(parts)-1], func(f string) bool { return foreign[strings.ToLower(f)] })
+}
+
+// readDescription reads one orrery.yaml, whose service is scope or under it,
+// and the logo it names. claims says whether a file that cannot be used
+// still names a service.
+func readDescription(ctx context.Context, files Files, paths []string, file, scope string) (d *Description, problem string, claims bool, err error) {
 	text, err := files.Read(ctx, file)
 	if err != nil || text == nil {
-		return nil, "", err
+		return nil, "", false, err
 	}
-	d, err := ParseDescriptor(text, scope)
+	parsed, err := ParseDescriptor(text, scope)
 	if err != nil {
-		return nil, err.Error(), nil
+		var named struct {
+			Service string `yaml:"service"`
+		}
+		_ = yaml.Unmarshal(text, &named)
+		return nil, err.Error(), named.Service != "", nil
 	}
-	out := &Description{Descriptor: *d, File: file}
-	if d.Icon == nil {
-		return out, "", nil
+	out := &Description{Descriptor: *parsed, File: file}
+	if parsed.Icon == nil {
+		return out, "", false, nil
 	}
-	logo := strings.TrimPrefix(strings.TrimPrefix(d.Icon.File, "./"), "/")
-	missing := `icon file "` + d.Icon.File + `" is not in the repository`
+	logo := strings.TrimPrefix(strings.TrimPrefix(parsed.Icon.File, "./"), "/")
+	missing := `icon file "` + parsed.Icon.File + `" is not in the repository`
 	if !slices.Contains(paths, logo) {
-		return out, missing, nil
+		return out, missing, false, nil
 	}
 	data, err := files.Read(ctx, logo)
 	if err != nil {
-		return nil, "", err
+		return nil, "", false, err
 	}
 	if data == nil {
-		return out, missing, nil
+		return out, missing, false, nil
 	}
-	icon, err := CheckIcon(*d.Icon, data)
+	icon, err := CheckIcon(*parsed.Icon, data)
 	if err != nil {
-		return out, err.Error(), nil
+		return out, err.Error(), false, nil
 	}
 	out.Logo = icon
-	return out, "", nil
+	return out, "", false, nil
 }

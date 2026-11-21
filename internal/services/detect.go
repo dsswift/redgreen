@@ -16,7 +16,7 @@ import (
 
 // Rules is the version of the rules below. Bump it on any change, so every
 // repository is read again instead of trusting its last answer.
-const Rules = 14
+const Rules = 15
 
 // Service types.
 const (
@@ -93,6 +93,9 @@ func baseOf(p string) string { return p[strings.LastIndex(p, "/")+1:] }
 func within(p, dir string) bool { return dir == "" || p == dir || strings.HasPrefix(p, dir+"/") }
 
 func join(dir, name string) string {
+	if name == "" {
+		return dir
+	}
 	if dir == "" {
 		return name
 	}
@@ -193,8 +196,52 @@ var (
 
 // Detect finds every service in one repository's files, each with what sits
 // beside it. repoName names a service at the root that names nothing itself.
-func Detect(paths []string, read Reader, repoName string) []Service {
-	services := find(paths, read, repoName)
+//
+// bounds are the folders an orrery.yaml names as services. Each is read as
+// a repository of its own: the rules run on its files alone, outside the
+// folders of the test, sample, and output kinds they would skip, and the one
+// service they find there is the folder's. The rest of the repository is
+// read around them, and a fallback service there (a library or a tool) is
+// made only when no bound holds one.
+func Detect(paths []string, read Reader, repoName string, bounds ...string) []Service {
+	bounds = slices.DeleteFunc(slices.Clone(bounds), func(b string) bool { return b == "" })
+	slices.Sort(bounds)
+	bounds = slices.Compact(bounds)
+	owner := func(p string) string {
+		held := ""
+		for _, b := range bounds {
+			if within(p, b) && len(b) > len(held) {
+				held = b
+			}
+		}
+		return held
+	}
+	var services []Service
+	for _, region := range append([]string{""}, bounds...) {
+		var files, nested []string
+		for _, p := range paths {
+			if owner(p) == region {
+				files = append(files, relative(p, region))
+			}
+		}
+		for _, b := range bounds {
+			if b != region && within(b, region) {
+				nested = append(nested, relative(b, region))
+			}
+		}
+		name := repoName
+		if region != "" {
+			name = baseOf(region)
+		}
+		found := find(files, func(p string) (string, bool) { return read(join(region, p)) }, name, nested)
+		if region != "" && len(found) == 1 {
+			found[0].ID, found[0].Path = "", ""
+		}
+		for _, s := range found {
+			s.ID, s.Path = join(region, s.ID), join(region, s.Path)
+			services = append(services, s)
+		}
+	}
 	files := serviceFiles(paths, services, read)
 	for i := range services {
 		services[i].Files = files[i]
@@ -202,7 +249,17 @@ func Detect(paths []string, read Reader, repoName string) []Service {
 	return services
 }
 
-func find(paths []string, read Reader, repoName string) []Service {
+// relative is p from inside dir, which holds it.
+func relative(p, dir string) string {
+	if dir == "" {
+		return p
+	}
+	return strings.TrimPrefix(strings.TrimPrefix(p, dir), "/")
+}
+
+// find runs the rules on one region's files. nested are the bounds inside
+// it: services of their own, which a Dockerfile above them may build.
+func find(paths []string, read Reader, repoName string, nested []string) []Service {
 	var files []string
 	for _, p := range paths {
 		if !skipped(p) {
@@ -489,7 +546,8 @@ func find(paths []string, read Reader, repoName string) []Service {
 			continue
 		}
 		dir := dirOf(file)
-		if slices.ContainsFunc(all, func(f found) bool { return within(f.path, dir) || within(dir, f.path) }) {
+		if slices.ContainsFunc(all, func(f found) bool { return within(f.path, dir) || within(dir, f.path) }) ||
+			slices.ContainsFunc(nested, func(n string) bool { return within(n, dir) }) {
 			continue
 		}
 		text, ok := read(file)
@@ -543,7 +601,7 @@ func find(paths []string, read Reader, repoName string) []Service {
 	}
 	// Two or more Terraform roots, each keeping its own state, are separate
 	// projects: one service each, in its own folder.
-	if roots := terraformRoots(terraform, read); len(roots) > 1 && len(bicep) == 0 {
+	if roots := terraformRoots(files, terraform, read); len(roots) > 1 && len(bicep) == 0 {
 		for _, r := range roots {
 			id := r
 			if slices.ContainsFunc(services, func(s Service) bool { return s.ID == r }) {
@@ -570,7 +628,7 @@ func find(paths []string, read Reader, repoName string) []Service {
 		}
 		services = append(services, Service{ID: id, Path: p, Name: nm, Type: infra.kind, Language: language})
 	}
-	if len(services) > 0 {
+	if len(services) > 0 || len(nested) > 0 {
 		return services
 	}
 
@@ -695,13 +753,18 @@ func localeLess(a, b string) bool {
 	return a < b
 }
 
+// InfraFile is an infra.yaml project: Terraform that infra applies, from
+// the folder that holds it.
+const InfraFile = "infra.yaml"
+
 // terraformRoot says whether any Terraform here is applied on its own: it
-// keeps state in a backend, or has variables files to apply with.
+// keeps state in a backend, has variables files to apply with, or an
+// infra.yaml applies it.
 func terraformRoot(files, terraform []string, read Reader) bool {
 	if len(terraform) == 0 {
 		return false
 	}
-	if slices.ContainsFunc(files, reTfVars.MatchString) {
+	if slices.ContainsFunc(files, func(f string) bool { return reTfVars.MatchString(f) || baseOf(f) == InfraFile }) {
 		return true
 	}
 	n := 0
@@ -720,9 +783,17 @@ func terraformRoot(files, terraform []string, read Reader) bool {
 }
 
 // terraformRoots are the folders whose Terraform keeps state: a likely root
-// file there declares a backend. A root inside another is not counted.
-func terraformRoots(terraform []string, read Reader) []string {
+// file there declares a backend, or the folder holds an infra.yaml and
+// Terraform under it (infra keeps the state for it). An infra.yaml at the
+// root says nothing about where its Terraform splits. A root inside another
+// is not counted.
+func terraformRoots(files, terraform []string, read Reader) []string {
 	var roots []string
+	for _, f := range files {
+		if dir := dirOf(f); baseOf(f) == InfraFile && dir != "" && slices.ContainsFunc(terraform, func(tf string) bool { return within(tf, dir) }) {
+			roots = append(roots, dir)
+		}
+	}
 	n := 0
 	for _, f := range terraform {
 		if !reTfLikely.MatchString(baseOf(f)) {
@@ -736,6 +807,7 @@ func terraformRoots(terraform []string, read Reader) []string {
 		}
 	}
 	sort.Strings(roots)
+	roots = slices.Compact(roots)
 	var outer []string
 	for _, r := range roots {
 		if !slices.ContainsFunc(outer, func(o string) bool { return o == "" || strings.HasPrefix(r, o+"/") }) {

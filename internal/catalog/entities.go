@@ -171,7 +171,7 @@ func ServiceEntities(r *provider.Repo, found *services.Found, icons map[string]s
 		if described[d.Service] {
 			continue
 		}
-		e := sdk.Entity{Blueprint: Service, Key: d.Service, Title: d.Service[strings.LastIndex(d.Service, "/")+1:], Relations: map[string]any{"repository": repo}, Fields: map[string]any{"origin": "built"}}
+		e := sdk.Entity{Blueprint: Service, Key: d.Service, Title: d.Service[strings.LastIndex(d.Service, "/")+1:], Relations: map[string]any{"repository": repo}, Fields: map[string]any{"origin": "built", "path": d.Path}}
 		describe(&e, d, icons, bare)
 		out = append(out, e)
 	}

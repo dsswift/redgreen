@@ -55,7 +55,10 @@ The forges' door into Orrery. Read `README.md` first.
   the day (`since`) and trimmed to the moment in Go.
 - `internal/services` finds services from the files that build them. `Detect`
   is the only place a service is recognised. Bump `Rules` with any change to
-  a rule, so every repository is read again.
+  a rule, so every repository is read again. `Read` reads every
+  `orrery.yaml` before it detects: a folder one names is a bound, read by
+  the rules as a repository of its own, so a described folder is always one
+  service.
 - `internal/jobs` follows CI jobs, from GitHub's `workflow_job` webhook and
   from each GitLab and Azure DevOps sync (`provider.JobReader`), for
   telemetry only: jobs waiting and running, wait and run times. Nothing in

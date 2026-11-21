@@ -368,6 +368,9 @@ func targetPath(repoKey string, found *services.Found, service string) string {
 			return s.Path
 		}
 	}
+	if d := found.Describing(service); d != nil {
+		return d.Path
+	}
 	return strings.TrimPrefix(strings.TrimPrefix(service, repoKey), "/")
 }
 
